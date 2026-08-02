@@ -1,15 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import {
-  FEATURED_STORIES,
-  getContinueReadingStory,
-  getMoreStoriesCount,
-  getStoryHref,
-} from "@/lib/storyCatalog";
-import { UserStatsService, type UserStats } from "@/lib/userStats";
 import {
   Search,
   Flame,
@@ -22,13 +15,14 @@ import {
   ArrowLeft,
   RotateCcw,
   Clock,
+  ChevronLeft,
   Trophy,
   type LucideIcon,
 } from "lucide-react";
 
 /* ─────────────────────────  shared palette  ───────────────────────── */
 const C = {
-  page: "#05070E",
+  page: "#020305",
   card: "#0B0F1C",
   card2: "#0D1424",
   chip: "#0F1526",
@@ -196,18 +190,10 @@ function Sparkline({
 
 /* ──────────────────────────────  page  ───────────────────────────── */
 export default function DashboardPage() {
-  const [userStats, setUserStats] = useState<UserStats>(UserStatsService.getStats());
-  const [nickname, setNickname] = useState("warm_dusk1679");
-
-  useEffect(() => {
-    setUserStats(UserStatsService.getStats());
-    setNickname(localStorage.getItem("wordflow_nickname") ?? "warm_dusk1679");
-  }, []);
-
   const stats: Stat[] = [
     {
       label: "سلسلة التعلم",
-      value: String(userStats.streakCount),
+      value: "12",
       sub: "يوم متتالي",
       icon: Flame,
       color: "text-orange-400",
@@ -218,7 +204,7 @@ export default function DashboardPage() {
     },
     {
       label: "إجمالي النقاط",
-      value: userStats.xpTotal.toLocaleString(),
+      value: "3,420",
       sub: "نقطة",
       icon: Star,
       color: "text-amber-400",
@@ -229,7 +215,7 @@ export default function DashboardPage() {
     },
     {
       label: "القصص المكتملة",
-      value: String(userStats.storiesCompleted),
+      value: "18",
       sub: "قصة",
       icon: BookOpen,
       color: "text-cyan-400",
@@ -251,10 +237,22 @@ export default function DashboardPage() {
     },
   ];
 
-  const featured = getContinueReadingStory();
+  const featured = {
+    id: "titanic-legend",
+    title: "The Legend of Titanic",
+    titleAr: "أسطورة السفينة التايتانيك",
+    level: "B1",
+    duration: "5 دقيقة",
+    progress: 65,
+    cover: "/images/titanic.png",
+  };
 
-  const stories = FEATURED_STORIES.filter((s) => !s.featured).slice(0, 4);
-  const moreStoriesCount = getMoreStoriesCount(stories.length + 1);
+  const stories: MiniStory[] = [
+    { id: "sherlock", title: "Sherlock Holmes", titleAr: "مغامرات هولمز", level: "B2", cover: "/images/sherlock.png" },
+    { id: "gatsby", title: "The Great Gatsby", titleAr: "غاتسبي العظيم", level: "B1", cover: "/images/gatsby.png" },
+    { id: "pride", title: "Pride & Prejudice", titleAr: "كبرياء وتحامل", level: "B1", cover: "/images/pride.png" },
+    { id: "romeo", title: "Romeo & Juliet", titleAr: "روميو وجولييت", level: "A2", cover: "/images/romeo.png" },
+  ];
 
   return (
     // Root shell flows LEFT → RIGHT: [ sidebar ] [ content ].
@@ -285,7 +283,7 @@ export default function DashboardPage() {
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-[#0F1424] border border-white/[0.06] text-slate-200 text-[13px] font-bold" dir="rtl">
               <Flame size={16} className="text-orange-400" fill="currentColor" />
-              <span>{userStats.streakCount} يوم متتالي</span>
+              <span>12 يوم متتالي</span>
             </div>
 
             <button className="relative text-slate-300 hover:text-white transition" aria-label="الإشعارات">
@@ -297,13 +295,13 @@ export default function DashboardPage() {
 
             <div className="flex items-center gap-3">
               <div className="text-right">
-                <p className="text-[13px] font-bold text-white leading-none">{nickname}</p>
+                <p className="text-[13px] font-bold text-white leading-none">warm_dusk1679</p>
                 <p className="text-[11px] text-slate-400 mt-1" dir="rtl">
-                  مستوى <span dir="ltr">{userStats.level}</span>
+                  مستوى <span dir="ltr">B1</span>
                 </p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 via-blue-500 to-fuchsia-500 flex items-center justify-center font-bold text-sm text-[#05070e]">
-                {nickname[0]?.toUpperCase() ?? "W"}
+                W
               </div>
             </div>
           </div>
@@ -312,46 +310,115 @@ export default function DashboardPage() {
         {/* BODY */}
         <main className="flex-1 p-8 overflow-y-auto space-y-6" dir="rtl">
           {/* ═══ HERO ═══ */}
-          <section
-            className="relative overflow-hidden rounded-3xl border"
-            style={{ background: "#06090F", borderColor: C.border }}
-          >
-            <div className="pointer-events-none absolute inset-y-0 right-0 w-[46%] hidden md:block">
-              <img src="/images/reading-desk.png" alt="مكتب القراءة" className="w-full h-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-r from-[#06090F] via-[#06090F]/60 to-transparent" />
-            </div>
+  <section
+  className="relative overflow-hidden rounded-[28px] border"
+  style={{
+    background: "#06090F",
+    borderColor: C.border,
+    minHeight: "240px",
+    boxShadow: "0 18px 45px rgba(0,0,0,.35)",
+  }}
+>
+  {/* Right Image */}
+  <div className="pointer-events-none absolute inset-y-0 right-0 w-[31%] hidden lg:block">
+    <img
+      src="/images/reading-desk.png"
+      alt="مكتب القراءة"
+      className="w-full h-full object-cover"
+    />
 
-            <div className="relative flex items-center justify-between gap-6 px-7 py-5" dir="ltr">
-              <div className="min-w-[240px] max-w-[340px] space-y-3 text-left" dir="rtl">
-                <p className="text-slate-300 text-[13px] font-bold">مرحباً بك مجدداً 👋</p>
-                <h1 className="text-[28px] sm:text-[34px] font-black leading-[1.15] text-white text-balance">
-                  أكمل{" "}
-                  <span className="bg-gradient-to-l from-cyan-400 via-violet-400 to-fuchsia-500 bg-clip-text text-transparent">
-                    رحلة
-                  </span>{" "}
-                  اليوم
-                </h1>
-                <p className="text-slate-400 text-[13px]">كل يوم تقربك من هدفك ✨</p>
-                <Link
-                  href={getStoryHref(getContinueReadingStory()) ?? "/stories"}
-                  className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-fuchsia-600 text-[13px] font-bold text-white shadow-lg shadow-purple-600/25 hover:brightness-110 transition"
-                >
-                  <span>متابعة القصة</span>
-                  <ArrowLeft size={16} />
-                </Link>
-              </div>
+    <div
+      className="absolute inset-0"
+      style={{
+        background:
+          "linear-gradient(90deg,#06090F 0%,#06090F 42%,rgba(6,9,15,.72) 68%,transparent 100%)",
+      }}
+    />
+  </div>
 
-              <ProgressRing value={73} size={132} gradientId="heroRing" from="#8b5cf6" mid="#ec4899" to="#22d3ee">
-                <span className="text-[12px] text-slate-400">تقدم اليوم</span>
-                <span className="text-3xl font-black text-white">73%</span>
-                <span className="mt-1 flex items-center gap-1 text-[11px] text-slate-400" dir="rtl">
-                  <Zap size={12} className="text-amber-400" fill="currentColor" /> 120 نقطة خبرة
-                </span>
-              </ProgressRing>
+  <div
+    className="relative flex items-center h-[240px] px-10"
+    dir="ltr"
+  >
+    {/* Left Text */}
 
-              <div className="hidden md:block w-[34%] shrink-0" aria-hidden />
-            </div>
-          </section>
+    <div
+      dir="rtl"
+      className="w-[340px] shrink-0 space-y-4 z-10"
+    >
+      <p className="text-[13px] font-bold text-slate-300">
+        مرحباً بك مجدداً 👋
+      </p>
+
+      <h1 className="text-[36px] font-black leading-[1.12] text-white">
+        أكمل{" "}
+        <span className="bg-gradient-to-l from-cyan-400 via-violet-400 to-fuchsia-500 bg-clip-text text-transparent">
+          رحلة
+        </span>{" "}
+        اليوم
+      </h1>
+
+      <p className="text-[14px] text-slate-400">
+        كل يوم تقربك من هدفك ✨
+      </p>
+
+      <Link
+        href="/stories"
+        className="inline-flex items-center gap-2.5 px-6 h-[46px] rounded-xl font-bold text-[13px] text-white transition hover:brightness-110"
+        style={{
+          background:
+            "linear-gradient(90deg,#2563EB,#7C3AED,#D946EF)",
+          boxShadow:
+            "0 12px 28px rgba(124,58,237,.30)",
+        }}
+      >
+        <span>متابعة القصة</span>
+        <ArrowLeft size={16} />
+      </Link>
+    </div>
+
+    {/* Push Ring To Center */}
+
+    <div className="flex-1" />
+
+    {/* Progress */}
+
+    <div className="mx-10 shrink-0 z-10">
+      <ProgressRing
+        value={73}
+        size={150}
+        gradientId="heroRing"
+        from="#8B5CF6"
+        mid="#EC4899"
+        to="#22D3EE"
+      >
+        <span className="text-[12px] text-slate-400">
+          تقدم اليوم
+        </span>
+
+        <span className="text-[34px] font-black text-white">
+          73%
+        </span>
+
+        <span
+          className="mt-1 flex items-center gap-1 text-[11px] text-slate-400"
+          dir="rtl"
+        >
+          <Zap
+            size={12}
+            className="text-amber-400"
+            fill="currentColor"
+          />
+          120 نقطة خبرة
+        </span>
+      </ProgressRing>
+    </div>
+
+    {/* Space Before Image */}
+
+    <div className="flex-1" />
+  </div>
+</section>
 
           {/* ═══ STAT CARDS ═══ */}
           <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -461,7 +528,7 @@ export default function DashboardPage() {
                       </span>
                     </div>
                     <Link
-                      href={getStoryHref(featured) ?? "/stories"}
+                      href="/stories"
                       className="h-[39px] min-w-[102px] px-5 shrink-0 rounded-[14px] flex items-center justify-center gap-2 text-[13px] font-black transition-all duration-200 hover:brightness-110 hover:scale-[1.015]"
                       style={{
                         background: "linear-gradient(135deg,#00C6DC 0%,#008FA5 100%)",
@@ -584,9 +651,7 @@ export default function DashboardPage() {
 
                   {/* 3 / 5 */}
                   <div className="mt-[12px] flex items-baseline justify-center gap-[5px] w-full" style={{ direction: "ltr" }}>
-                    <span className="text-[30px] font-black leading-none tracking-[-1.2px] text-white">
-                      {Math.min(userStats.storiesCompleted, 5)}
-                    </span>
+                    <span className="text-[30px] font-black leading-none tracking-[-1.2px] text-white">3</span>
                     <span className="text-[13px] font-bold leading-none" style={{ color: "#5F6B7A", letterSpacing: "-.2px" }}>/ 5</span>
                   </div>
 
@@ -597,11 +662,7 @@ export default function DashboardPage() {
                   >
                     <div
                       className="absolute left-0 top-0 h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, (Math.min(userStats.storiesCompleted, 5) / 5) * 100)}%`,
-                        background: "linear-gradient(90deg,#00AFC2,#00D8C7)",
-                        boxShadow: "0 0 8px rgba(0,210,205,.35)",
-                      }}
+                      style={{ width: "60%", background: "linear-gradient(90deg,#00AFC2,#00D8C7)", boxShadow: "0 0 8px rgba(0,210,205,.35)" }}
                     />
                   </div>
 
@@ -618,7 +679,7 @@ export default function DashboardPage() {
                 </div>
 
                 {/* TROPHY */}
-                <div className="absolute inset-y-0 right-0 w-[58%] flex items-center justify-center pointer-events-none z-14">
+                <div className="absolute inset-y-0 right-0 w-[58%] flex items-center justify-center pointer-events-none z-10">
                   <img
                     src="/images/trophy.png"
                     alt="كأس التحدي الأسبوعي"
@@ -654,7 +715,7 @@ export default function DashboardPage() {
                 {stories.map((s) => (
                   <Link
                     key={s.id}
-                    href={getStoryHref(s) ?? "/stories"}
+                    href="/stories"
                     className="group relative flex-1 min-w-0 h-[176px] overflow-hidden rounded-[15px] transition-all duration-300 ease-out hover:-translate-y-[5px]"
                     style={{
                       transformStyle: "preserve-3d",
@@ -733,7 +794,7 @@ export default function DashboardPage() {
                   <div className="absolute inset-[1px] rounded-[14px] pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ boxShadow: "inset 0 0 22px rgba(0,242,210,.08)" }} />
                   {/* +12 */}
                   <span className="relative z-10 text-[22px] font-black leading-none text-white transition-all duration-300 group-hover:text-[#00F2D2] group-hover:scale-[1.05]" style={{ textShadow: "0 3px 12px rgba(0,0,0,.55)" }}>
-                    +{moreStoriesCount}
+                    +12
                   </span>
                   {/* MORE */}
                   <span className="relative z-10 mt-2 text-[10px] font-semibold transition-colors duration-300" style={{ color: C.text3 }} dir="rtl">

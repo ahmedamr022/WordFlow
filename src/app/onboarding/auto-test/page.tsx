@@ -221,7 +221,6 @@ export default function AutoPlacementTestPage() {
         {/* Adaptive Radar & Progress Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="flex items-center gap-3">
-            <Logo size="sm" />
             <div>
               <span className="font-extrabold text-base text-white">اختبار WordFlow التكيفي (10 أسئلة)</span>
               <span className="block text-[11px] text-sky-400 font-mono">

@@ -889,7 +889,6 @@ export default function LandingPage() {
       <footer className="border-t border-slate-800/80 py-12 px-6 max-w-7xl mx-auto text-center space-y-6">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           <Link href="/" className="flex items-center gap-3">
-            <Logo size="sm" />
             <span className="font-black text-xl font-sans text-white">
               Word<span className="text-[#ff6b6b]">Flow</span>
             </span>
