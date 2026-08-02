@@ -1,0 +1,628 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   WordFlow Theme
+============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  --background: #05070d;
+  --background-deep: #05070d;
+  --foreground: #f2f6ff;
+
+  --teal: #19e6d2;
+  --teal-soft: rgba(25,230,210,.35);
+
+  --coral: #ff4d7a;
+  --coral-soft: rgba(255,77,122,.35);
+
+  --wf-page:#05070e;
+  --wf-sidebar:#080b14;
+  --wf-header:#070a12;
+  --wf-card:#0b0f1c;
+  --wf-card-2:#0d1424;
+  --wf-chip:#0f1526;
+
+  --wf-line:rgba(255,255,255,.06);
+  --wf-line-strong:rgba(255,255,255,.10);
+
+  --wf-cyan:#22e0c8;
+  --wf-teal:#00afc2;
+  --wf-pink:#ff4d7a;
+  --wf-purple:#7c6cff;
+  --wf-gold:#fbbf24;
+  --wf-red:#ff6b6b;
+
+  --wf-text:#f4f7fb;
+  --wf-text2:#9fb0c6;
+  --wf-text3:#64748b;
+
+  --background:var(--wf-page);
+  --foreground:var(--wf-text);
+
+  --card:var(--wf-card);
+  --card-foreground:var(--wf-text);
+
+  --popover:var(--wf-card-2);
+  --popover-foreground:var(--wf-text);
+
+  --primary:var(--wf-cyan);
+  --primary-foreground:#05070e;
+
+  --secondary:var(--wf-chip);
+  --secondary-foreground:var(--wf-text);
+
+  --muted:var(--wf-chip);
+  --muted-foreground:var(--wf-text2);
+
+  --accent:var(--wf-chip);
+  --accent-foreground:var(--wf-text);
+
+  --border:var(--wf-line);
+  --input:var(--wf-line-strong);
+  --ring:var(--wf-teal);
+
+  --radius:.75rem;
+
+  --sidebar:var(--wf-sidebar);
+  --sidebar-foreground:var(--wf-text);
+  --sidebar-primary:var(--wf-cyan);
+  --sidebar-primary-foreground:#05070e;
+  --sidebar-accent:var(--wf-chip);
+  --sidebar-accent-foreground:var(--wf-text);
+  --sidebar-border:var(--wf-line);
+  --sidebar-ring:var(--wf-teal);
+}
+
+/* ============================================================
+   Base
+============================================================ */
+
+@layer base {
+
+*{
+border-color:var(--border);
+outline-color:color-mix(in srgb,var(--ring) 50%,transparent);
+box-sizing:border-box;
+}
+
+html{
+scroll-behavior:smooth;
+}
+
+body{
+background:var(--background);
+color:var(--foreground);
+font-family:var(--font-readex-pro),var(--font-outfit),sans-serif;
+overflow-x:hidden;
+min-height:100vh;
+position:relative;
+}
+
+}
+
+/* ============================================================
+   Background Glow
+============================================================ */
+
+body::before{
+content:"";
+position:fixed;
+top:-15%;
+right:-10%;
+width:55vw;
+height:55vw;
+border-radius:50%;
+pointer-events:none;
+z-index:-2;
+
+background:
+radial-gradient(circle,
+rgba(45,226,197,.12) 0%,
+rgba(11,18,32,0) 70%);
+}
+
+body::after{
+content:"";
+position:fixed;
+bottom:-15%;
+left:-10%;
+width:55vw;
+height:55vw;
+border-radius:50%;
+pointer-events:none;
+z-index:-2;
+
+background:
+radial-gradient(circle,
+rgba(255,107,107,.11) 0%,
+rgba(11,18,32,0) 70%);
+}
+
+/* ============================================================
+   Helpers
+============================================================ */
+
+.font-arabic{
+font-family:var(--font-readex-pro);
+}
+
+.text-gradient-brand{
+background:linear-gradient(
+100deg,
+#22e0c8 0%,
+#7ff5e2 35%,
+#ff8e8e 75%,
+#ff6b6b 100%
+);
+
+-webkit-background-clip:text;
+background-clip:text;
+color:transparent;
+}
+
+.hairline{
+height:1px;
+background:linear-gradient(
+90deg,
+transparent,
+rgba(255,255,255,.12),
+transparent
+);
+}
+
+/* ============================================================
+   Glass Cards
+============================================================ */
+
+.glass-card{
+background:rgba(18,26,43,.72);
+backdrop-filter:blur(18px);
+-webkit-backdrop-filter:blur(18px);
+border:1px solid rgba(255,255,255,.07);
+
+box-shadow:
+0 10px 40px rgba(0,0,0,.45);
+}
+
+.glass-card-hover{
+transition:.35s cubic-bezier(.4,0,.2,1);
+}
+
+.glass-card-hover:hover{
+
+background:rgba(26,36,56,.86);
+
+border-color:
+rgba(45,226,197,.35);
+
+transform:translateY(-4px);
+
+box-shadow:
+0 18px 48px rgba(45,226,197,.14);
+
+}
+
+/* ============================================================
+   Buttons
+============================================================ */
+
+.btn-neon{
+
+position:relative;
+border-radius:9999px;
+
+border:1.5px solid #2de2c5;
+
+background:
+linear-gradient(
+135deg,
+rgba(45,226,197,.25),
+rgba(255,107,107,.20)
+);
+
+color:#fff;
+
+font-weight:800;
+
+box-shadow:
+0 0 20px rgba(45,226,197,.45),
+0 0 36px rgba(255,107,107,.25),
+inset 0 0 14px rgba(45,226,197,.15);
+
+transition:.3s;
+}
+
+.btn-neon:hover{
+
+transform:
+translateY(-2px)
+scale(1.02);
+
+border-color:#7ff5e2;
+
+background:
+linear-gradient(
+135deg,
+rgba(45,226,197,.40),
+rgba(255,107,107,.30)
+);
+
+}
+
+.btn-ghost{
+
+border-radius:9999px;
+
+border:1.5px solid rgba(255,255,255,.35);
+
+background:rgba(255,255,255,.04);
+
+color:white;
+
+font-weight:700;
+
+transition:.3s;
+}
+
+.btn-ghost:hover{
+
+background:
+rgba(255,255,255,.12);
+
+border-color:
+rgba(255,255,255,.75);
+
+transform:
+translateY(-2px);
+
+}
+/* ============================================================
+   Neon Text
+============================================================ */
+
+.neon-text-teal {
+  color: #7ff5e2;
+  text-shadow:
+    0 0 8px rgba(45,226,197,.65),
+    0 0 26px rgba(45,226,197,.35);
+}
+
+.neon-text-coral {
+  color: #ff9b9b;
+  text-shadow:
+    0 0 8px rgba(255,107,107,.65),
+    0 0 26px rgba(255,107,107,.35);
+}
+
+/* ============================================================
+   Hero Helpers
+============================================================ */
+
+.hero-ring {
+  border-radius: 9999px;
+  padding: 2px;
+
+  background:
+    conic-gradient(
+      from 210deg,
+      rgba(45,226,197,.95),
+      rgba(45,226,197,.15) 28%,
+      rgba(255,107,107,.95) 62%,
+      rgba(255,107,107,.15) 86%,
+      rgba(45,226,197,.95)
+    );
+
+  box-shadow:
+    0 0 60px rgba(45,226,197,.18),
+    0 0 90px rgba(255,107,107,.14);
+}
+
+.icon-badge{
+display:grid;
+place-items:center;
+
+border-radius:9999px;
+
+background:rgba(11,18,32,.85);
+
+backdrop-filter:blur(8px);
+}
+
+.icon-badge--teal{
+
+border:1.5px solid rgba(45,226,197,.85);
+
+color:#6ff0da;
+
+box-shadow:
+0 0 16px rgba(45,226,197,.45),
+inset 0 0 12px rgba(45,226,197,.15);
+
+}
+
+.icon-badge--coral{
+
+border:1.5px solid rgba(255,107,107,.85);
+
+color:#ff9b9b;
+
+box-shadow:
+0 0 16px rgba(255,107,107,.45),
+inset 0 0 12px rgba(255,107,107,.15);
+
+}
+
+.blob{
+position:absolute;
+border-radius:50%;
+filter:blur(90px);
+pointer-events:none;
+z-index:0;
+}
+
+/* ============================================================
+   Typing Engine
+============================================================ */
+
+.char-correct{
+
+color:#2de2c5;
+
+text-shadow:
+0 0 14px rgba(45,226,197,.60);
+
+}
+
+.char-incorrect{
+
+color:#ff6b6b;
+
+background:
+rgba(255,107,107,.20);
+
+border-radius:4px;
+
+}
+
+.char-pending{
+
+color:#4b5871;
+
+}
+
+.char-cursor{
+
+position:relative;
+
+}
+
+.char-cursor::after{
+
+content:"";
+
+position:absolute;
+
+left:0;
+right:0;
+bottom:-4px;
+
+height:3px;
+
+background:#2de2c5;
+
+border-radius:2px;
+
+box-shadow:
+0 0 12px #2de2c5;
+
+animation:
+cursor-blink
+1s
+ease-in-out
+infinite;
+
+}
+
+/* ============================================================
+   Scrollbar
+============================================================ */
+
+::-webkit-scrollbar{
+width:8px;
+height:8px;
+}
+
+::-webkit-scrollbar-track{
+
+background:#080b14;
+
+}
+
+::-webkit-scrollbar-thumb{
+
+background:#22304a;
+
+border-radius:4px;
+
+}
+
+::-webkit-scrollbar-thumb:hover{
+
+background:#2f405f;
+
+}
+
+/* ============================================================
+   Animations
+============================================================ */
+
+@keyframes float-orb-1{
+
+0%{
+transform:
+translate(0,0)
+scale(1);
+}
+
+50%{
+transform:
+translate(-60px,80px)
+scale(1.1);
+}
+
+100%{
+transform:
+translate(40px,40px)
+scale(.95);
+}
+
+}
+
+@keyframes float-orb-2{
+
+0%{
+transform:
+translate(0,0)
+scale(1);
+}
+
+50%{
+transform:
+translate(80px,-60px)
+scale(1.15);
+}
+
+100%{
+transform:
+translate(-50px,-30px)
+scale(.90);
+}
+
+}
+
+@keyframes slide-up{
+
+from{
+
+opacity:0;
+
+transform:
+translateY(16px);
+
+}
+
+to{
+
+opacity:1;
+
+transform:
+translateY(0);
+
+}
+
+}
+
+@keyframes scale-up{
+
+from{
+
+opacity:0;
+
+transform:
+scale(.90);
+
+}
+
+to{
+
+opacity:1;
+
+transform:
+scale(1);
+
+}
+
+}
+
+@keyframes fade-in-soft{
+
+from{
+opacity:0;
+}
+
+to{
+opacity:1;
+}
+
+}
+
+@keyframes cursor-blink{
+
+0%,100%{
+opacity:1;
+}
+
+50%{
+opacity:.3;
+}
+
+}
+
+/* ============================================================
+   Animation Helpers
+============================================================ */
+
+.animate-slide-up{
+
+animation:
+slide-up
+.55s
+cubic-bezier(.16,1,.3,1)
+forwards;
+
+}
+
+.animate-scale-up{
+
+animation:
+scale-up
+.45s
+cubic-bezier(.16,1,.3,1)
+forwards;
+
+}
+
+.animate-fade{
+
+animation:
+fade-in-soft
+.5s
+ease-out
+forwards;
+
+}
+
+/* ============================================================
+   Accessibility
+============================================================ */
+
+@media (prefers-reduced-motion: reduce){
+
+*,
+*::before,
+*::after{
+
+animation-duration:.001ms !important;
+
+animation-iteration-count:1 !important;
+
+transition-duration:.001ms !important;
+
+}
+
+}
