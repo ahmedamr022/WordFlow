@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+import StoriesPage from "../stories/page";
 
-/** Legacy route — canonical stories browser lives at /stories */
-export default function StoriesListRedirect() {
-  redirect("/stories");
+export default function StoriesListPage() {
+  return <StoriesPage />;
 }

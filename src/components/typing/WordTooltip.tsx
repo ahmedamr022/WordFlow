@@ -1,74 +1,112 @@
 "use client";
 
 import React from "react";
-import { StoryWord } from "@/types";
-import { Volume2, X } from "lucide-react";
-import { AudioService } from "@/lib/audio/kokoroTTS";
 
 interface WordTooltipProps {
-  word: StoryWord;
-  onClose?: () => void;
+  word: string;
+  pos: string;
+  meaning: string;
+  hint: string;
+  active: boolean;
+  left: number;
+  top: number;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export const WordTooltip: React.FC<WordTooltipProps> = ({ word, onClose }) => {
-  const playWordAudio = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    AudioService.playText(word.word, 0.9);
-  };
-
+export const WordTooltip: React.FC<WordTooltipProps> = ({
+  word,
+  pos,
+  meaning,
+  hint,
+  active,
+  left,
+  top,
+  onMouseEnter,
+  onMouseLeave,
+}) => {
   return (
-    <div className="w-full max-w-lg mb-6 mx-auto p-4 rounded-2xl glass-card border border-sky-400/40 shadow-2xl animate-in fade-in slide-in-from-top-3 duration-200 text-right dir-rtl relative">
-      {onClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-3 left-3 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      )}
+    <div
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className={`absolute z-[100] w-[240px] rounded-[18px] p-[14px_18px] ltr text-left transition-all duration-200 ease-out ${
+        active
+          ? "opacity-100 visible translate-y-0 scale-100 pointer-events-auto"
+          : "opacity-0 invisible translate-y-2 scale-95 pointer-events-none"
+      }`}
+      style={{
+        left: `${left}px`,
+        top: `${top}px`,
+        background: "rgba(8, 15, 32, 0.65)",
+        border: "1px solid rgba(0, 210, 255, 0.3)",
+        backdropFilter: "blur(25px) saturate(180%)",
+        WebkitBackdropFilter: "blur(25px) saturate(180%)",
+        boxShadow:
+          "0 20px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(0, 210, 255, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.2)",
+      }}
+    >
+      {/* Pop Card Arrow */}
+      <div
+        className="absolute -bottom-[6px] left-[22px] w-[10px] h-[10px] rotate-45"
+        style={{
+          background: "rgba(8, 15, 32, 0.65)",
+          borderBottom: "1px solid rgba(0, 210, 255, 0.3)",
+          borderRight: "1px solid rgba(0, 210, 255, 0.3)",
+        }}
+      />
 
-      <div className="flex items-center justify-between gap-3 border-b border-slate-700/50 pb-2 mb-2">
-        <div className="flex items-center gap-3">
-          <span className="font-bold text-2xl text-sky-400 font-sans tracking-wide dir-ltr">
-            {word.word}
-          </span>
-          {word.ipa && (
-            <span className="font-mono text-xs text-slate-400 font-normal">
-              {word.ipa}
-            </span>
-          )}
-        </div>
-
-        <button
-          onClick={playWordAudio}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-500/20 text-sky-400 hover:bg-sky-500/40 transition-all active:scale-95 text-xs font-bold font-sans dir-ltr"
+      <div className="flex items-center justify-between mb-1.5">
+        <span
+          className="font-['Inter'] text-[19px] font-extrabold tracking-tight bg-clip-text text-transparent"
+          style={{
+            backgroundImage: "linear-gradient(135deg, #ffffff 30%, #00d2ff 100%)",
+          }}
         >
-          <Volume2 className="w-4 h-4" />
-          <span>Listen</span>
+          {word}
+        </span>
+        <button
+          className="w-[28px] h-[28px] rounded-full flex items-center justify-center text-[#00d2ff] text-[11px] transition-transform hover:scale-110 active:scale-90"
+          style={{
+            background: "rgba(0, 210, 255, 0.12)",
+            border: "1px solid rgba(0, 210, 255, 0.3)",
+            boxShadow: "0 0 10px rgba(0, 210, 255, 0.15)",
+          }}
+        >
+          <i className="fa-solid fa-volume-high"></i>
         </button>
       </div>
 
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-base font-bold text-white font-arabic">
-          {word.translationAr}
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className="text-[11px] font-bold px-2.2 py-0.5 rounded-full text-[#d8b4fe]"
+          style={{
+            background: "rgba(168, 85, 247, 0.15)",
+            border: "1px solid rgba(168, 85, 247, 0.35)",
+          }}
+        >
+          {pos}
         </span>
-        {word.partOfSpeech && (
-          <span className="bg-sky-400/10 text-sky-300 px-2 py-0.5 rounded text-[11px] font-mono border border-sky-400/20">
-            {word.partOfSpeech}
-          </span>
+      </div>
+
+      <div
+        className="h-[1px] my-2"
+        style={{
+          background:
+            "linear-gradient(90deg, rgba(255, 255, 255, 0.15), transparent)",
+        }}
+      />
+
+      <div className="flex flex-col gap-0.5 rtl text-right">
+        <span
+          className="text-[15px] font-bold text-[#38bdf8]"
+          style={{ textShadow: "0 0 12px rgba(56, 189, 248, 0.3)" }}
+        >
+          {meaning}
+        </span>
+        {hint && (
+          <span className="text-[11px] text-white/55 font-medium">{hint}</span>
         )}
       </div>
-
-      {word.exampleSentence && (
-        <div className="mt-2 text-xs border-t border-slate-700/40 pt-2 text-slate-300">
-          <p className="font-sans dir-ltr text-sky-200 mb-0.5">
-            "{word.exampleSentence}"
-          </p>
-          {word.exampleTranslation && (
-            <p className="font-arabic text-slate-400">{word.exampleTranslation}</p>
-          )}
-        </div>
-      )}
     </div>
   );
 };

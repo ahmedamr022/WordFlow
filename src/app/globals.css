@@ -148,7 +148,15 @@ rgba(11,18,32,0) 70%);
 ============================================================ */
 
 .font-arabic{
-font-family:var(--font-readex-pro);
+font-family:var(--font-cairo),var(--font-readex-pro);
+}
+
+.font-cairo{
+font-family:var(--font-cairo),var(--font-readex-pro),sans-serif;
+}
+
+.font-en{
+font-family:var(--font-plus-jakarta),var(--font-inter),sans-serif;
 }
 
 .text-gradient-brand{

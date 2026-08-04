@@ -1,18 +1,37 @@
 "use client";
 
 import { VocabularyCategory } from "@/data/vocabularyData";
+import {
+  Briefcase,
+  Plane,
+  Heart,
+  GraduationCap,
+  Laptop,
+  Trees,
+  UtensilsCrossed,
+  MessageCircle,
+} from "lucide-react";
 
-const PROGRESS_COLORS = [
-  "#22E0C8",
+const CARD_COLORS = [
+  "#EC4899",
   "#3B82F6",
-  "#FBBF24",
-  "#FF6B6B",
-  "#7C6CFF",
+  "#F59E0B",
+  "#EF4444",
   "#10B981",
-  "#F472B6",
+  "#8B5CF6",
   "#06B6D4",
-  "#A78BFA",
-  "#FB923C",
+  "#22C55E",
+];
+
+const ICONS = [
+  Briefcase,
+  Plane,
+  GraduationCap,
+  Heart,
+  Laptop,
+  MessageCircle,
+  Trees,
+  UtensilsCrossed,
 ];
 
 interface CategoryCardProps {
@@ -22,68 +41,344 @@ interface CategoryCardProps {
   onClick: () => void;
 }
 
-export function CategoryCard({ category, progress, index, onClick }: CategoryCardProps) {
-  const barColor = PROGRESS_COLORS[index % PROGRESS_COLORS.length];
+export function CategoryCard({
+  category,
+  progress,
+  index,
+  onClick,
+}: CategoryCardProps) {
+  const color = CARD_COLORS[index % CARD_COLORS.length];
+  const Icon = ICONS[index % ICONS.length];
 
   return (
     <button
-      type="button"
       onClick={onClick}
-      className="group relative w-full text-right rounded-[18px] overflow-hidden border transition-all duration-300 hover:-translate-y-1 hover:shadow-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/50"
-      style={{
-        background: "#0B0F1C",
-        borderColor: "rgba(255,255,255,0.06)",
-        boxShadow: "0 12px 32px rgba(0,0,0,0.35)",
+      className="
+        group
+        relative
+        overflow-hidden
+        rounded-[22px]
+        border
+        text-left
+        transition-all
+        duration-300
+        ease-out
+        hover:-translate-y-[4px]
+        hover:shadow-[0_18px_45px_rgba(0,0,0,.42)]
+        active:scale-[.985]
+      "
+                style={{
+          background: `
+          linear-gradient(
+          180deg,
+          ${color}08 0%,
+          #182132 18%,
+          #141D2C 55%,
+          #111827 100%
+          )
+          `,
+
+        borderColor: "rgba(255,255,255,.045)",
+
+        boxShadow:
+          "0 8px 28px rgba(0,0,0,.32), inset 0 1px rgba(255,255,255,.03)",
       }}
     >
-      {/* Cover image */}
-      <div className="relative h-[130px] overflow-hidden">
+      {/* ================= IMAGE ================= */}
+
+      <div className="relative h-[180px] overflow-hidden">
+
         <img
           src={category.coverImage}
           alt={category.titleEn}
-          className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+          className="
+            absolute
+            inset-0
+            h-full
+            w-full
+            object-cover
+            brightness-[.90]
+            contrast-[1.08]
+            saturate-[1.05]
+            duration-700
+            group-hover:scale-[1.06]
+          "
         />
+
+        {/* Dark Cinematic Overlay */}
+
         <div
           className="absolute inset-0"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(5,7,14,0.05) 0%, rgba(5,7,14,0.35) 55%, rgba(5,7,14,0.92) 100%)",
+            background: `
+            linear-gradient(
+              180deg,
+
+              rgba(5,8,15,.03) 0%,
+
+              rgba(5,8,15,.10) 20%,
+
+              rgba(5,8,15,.22) 40%,
+
+              rgba(5,8,15,.55) 65%,
+
+              rgba(17,24,39,.92) 88%,
+
+              #111827 100%
+            )
+          `,
           }}
         />
-        <span className="absolute bottom-3 right-3 w-9 h-9 rounded-xl bg-[#0B0F1C]/90 border border-white/10 flex items-center justify-center text-lg shadow-lg">
-          {category.icon}
-        </span>
+
+        {/* Soft Top Light */}
+
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            background:
+              "radial-gradient(circle at 50% -10%, rgba(255,255,255,.18), transparent 55%)",
+          }}
+        />
+
+        {/* Color Glow */}
+
+        <div
+          className="
+            absolute
+            -bottom-16
+            left-1/2
+            h-36
+            w-36
+            -translate-x-1/2
+            rounded-full
+            blur-[70px]
+            opacity-25
+          "
+          style={{
+            background: color,
+          }}
+        />
+
+        {/* Premium Icon */}
+
+        <div
+          className="
+            absolute
+            bottom-5
+            right-5
+            flex
+            h-11
+            w-11
+            items-center
+            justify-center
+            rounded-full
+            border
+            backdrop-blur-2xl
+            duration-300
+            group-hover:scale-110
+          "
+          style={{
+            background: "rgba(20,28,40,.72)",
+
+            borderColor: `${color}55`,
+
+            boxShadow:
+              "0 8px 22px rgba(0,0,0,.40), inset 0 1px rgba(255,255,255,.05)",
+          }}
+        >
+          <Icon
+            size={20}
+            strokeWidth={2.2}
+            style={{
+              color,
+            }}
+          />
+        </div>
+
+        {/* Inner Highlight */}
+
+        <div
+          className="
+            absolute
+            inset-0
+            rounded-t-[22px]
+            border-b
+            border-white/[0.03]
+          "
+        />
       </div>
 
-      {/* Info */}
-      <div className="px-4 pt-3 pb-4 space-y-2.5">
-        <h3 className="text-[15px] font-black text-white text-left dir-ltr leading-tight group-hover:text-cyan-300 transition-colors">
+      {/* ================= CONTENT ================= */}
+
+      <div className="px-4 pt-3 pb-4">
+        <h3
+          className="
+            min-h-[48px]
+            text-[15px]
+            font-bold
+            leading-6
+            tracking-[-0.02em]
+            text-slate-50
+            transition-colors
+            duration-300
+            group-hover:text-white
+          "
+        >
           {category.titleEn}
         </h3>
-        <p className="text-[12px] font-bold text-slate-400" dir="rtl">
-          {category.words.length} كلمة
-        </p>
 
-        {/* Progress bar */}
-        <div className="flex items-center gap-2.5">
-          <div
-            className="relative flex-1 h-[5px] rounded-full overflow-hidden"
-            style={{ background: "rgba(255,255,255,0.08)" }}
+        <div className="mt-2 flex items-center justify-between">
+
+          <span
+            className="
+              text-[12px]
+              font-medium
+              text-slate-500
+            "
           >
-            <div
-              className="absolute left-0 top-0 h-full rounded-full transition-all duration-700"
-              style={{
-                width: `${progress}%`,
-                background: barColor,
-                boxShadow: `0 0 8px ${barColor}66`,
-              }}
-            />
-          </div>
-          <span className="text-[11px] font-bold text-slate-300 shrink-0 w-8 text-left dir-ltr">
+            {category.words.length} كلمة
+          </span>
+
+          <span
+            className="text-[13px] font-bold tracking-wide"
+            style={{
+              color,
+            }}
+          >
             {progress}%
           </span>
+
+        </div>
+
+        {/* Progress */}
+
+        <div className="mt-4">
+
+          <div
+            className="
+              relative
+              h-[4px]
+              overflow-hidden
+              rounded-full
+              bg-[#2B3445]
+            "
+          >
+
+            <div
+              className="
+                absolute
+                inset-y-0
+                left-0
+                rounded-full
+                transition-all
+                duration-700
+              "
+              style={{
+                width: `${progress}%`,
+                background: color,
+                boxShadow: `
+                  0 0 10px ${color}99,
+                  0 0 22px ${color}55
+                `,
+              }}
+            />
+
+          </div>
+
         </div>
       </div>
+
+      {/* Soft Glow */}
+
+      <div
+        className="
+          pointer-events-none
+          absolute
+          -right-24
+          -top-24
+          h-52
+          w-52
+          rounded-full
+          opacity-0
+          blur-[100px]
+          transition-all
+          duration-500
+          group-hover:opacity-10
+        "
+        style={{
+          background: color,
+        }}
+      />
+
+      {/* Glass Reflection */}
+
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          opacity-0
+          transition-opacity
+          duration-500
+          group-hover:opacity-100
+        "
+      >
+
+        <div
+          className="
+            absolute
+            -left-40
+            top-0
+            h-full
+            w-24
+            rotate-[22deg]
+            bg-gradient-to-r
+            from-transparent
+            via-white/15
+            to-transparent
+            transition-all
+            duration-[1400ms]
+            group-hover:left-[130%]
+          "
+        />
+
+      </div>
+
+      {/* Inner Border */}
+
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-[1px]
+          rounded-[21px]
+          border
+        "
+        style={{
+          borderColor: "rgba(255,255,255,.025)",
+        }}
+      />
+
+      {/* Noise Texture */}
+
+      <div
+        className="
+          pointer-events-none
+          absolute
+          inset-0
+          opacity-[0.025]
+          mix-blend-overlay
+        "
+        style={{
+          backgroundImage: `
+            radial-gradient(circle at 25% 25%, white 1px, transparent 1px),
+            radial-gradient(circle at 75% 60%, white 1px, transparent 1px),
+            radial-gradient(circle at 45% 85%, white 1px, transparent 1px)
+          `,
+          backgroundSize: "18px 18px",
+        }}
+      />
+
     </button>
   );
 }

@@ -1,144 +1,175 @@
 "use client";
 
-import React, { useState } from "react";
-import { StoryLine, StoryWord } from "@/types";
+import React, { useRef, useState } from "react";
 import { WordTooltip } from "./WordTooltip";
-import { AudioService } from "@/lib/audio/kokoroTTS";
+
+export interface WordData {
+  text?: string;
+  word?: string;
+  pos?: string;
+  meaning?: string;
+  hint?: string;
+  isCyan?: boolean;
+  isPurple?: boolean;
+  hasCaret?: boolean;
+}
+
+export interface LineData {
+  id?: string;
+  text?: string;
+  translation?: string;
+  words?: WordData[];
+}
 
 interface SentenceDisplayProps {
-  currentLine: StoryLine;
-  typedChars: string;
-  errors: boolean[];
-  currentIndex: number;
+  currentLine?: LineData;
+  levelBadge?: string;
 }
 
 export const SentenceDisplay: React.FC<SentenceDisplayProps> = ({
   currentLine,
-  typedChars,
-  errors,
-  currentIndex,
+  levelBadge = "B1",
 }) => {
-  const [hoveredWord, setHoveredWord] = useState<StoryWord | null>(null);
+  const sentenceSectionRef = useRef<HTMLDivElement>(null);
+  const hideCardTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const handleWordClick = (word: StoryWord) => {
-    AudioService.playWord(word.word, 1.0);
+  const words = currentLine?.words || [];
+  const arabicTranslation = currentLine?.translation || "";
+
+  const [activeCard, setActiveCard] = useState({
+    visible: false,
+    word: "",
+    pos: "",
+    meaning: "",
+    hint: "",
+    left: 0,
+    top: 0,
+  });
+
+  const showPopCard = (wordObj: WordData, targetEl: HTMLElement) => {
+    if (hideCardTimeout.current) clearTimeout(hideCardTimeout.current);
+
+    if (sentenceSectionRef.current) {
+      const wordRect = targetEl.getBoundingClientRect();
+      const sectionRect = sentenceSectionRef.current.getBoundingClientRect();
+
+      const leftPos = wordRect.left - sectionRect.left;
+      const topPos = wordRect.top - sectionRect.top - 130;
+
+      setActiveCard({
+        visible: true,
+        word: wordObj.word || wordObj.text || "",
+        pos: wordObj.pos || "Word",
+        meaning: wordObj.meaning || "",
+        hint: wordObj.hint || "",
+        left: Math.max(0, leftPos),
+        top: topPos,
+      });
+    }
   };
 
-  const fullText = currentLine.text || "";
-  const tokens = fullText.split(/(\s+)/);
-
-  let globalCharIndex = 0;
+  const hidePopCard = () => {
+    hideCardTimeout.current = setTimeout(() => {
+      setActiveCard((prev) => ({ ...prev, visible: false }));
+    }, 200);
+  };
 
   return (
-    <div className="relative w-full my-6 text-center select-none flex flex-col items-center">
-      {/* Tooltip Box Container */}
-      <div className="h-16 flex items-center justify-center mb-2 w-full">
-        {hoveredWord ? (
-          <div className="animate-in fade-in zoom-in-95 duration-150">
-            <WordTooltip word={hoveredWord} />
-          </div>
-        ) : (
-          <div className="text-xs text-slate-500 font-arabic">قف على أي كلمة لعرض الترجمة والنطق</div>
-        )}
+    <div
+      className="relative w-full max-w-[580px] flex flex-col items-start text-left ltr"
+      ref={sentenceSectionRef}
+    >
+      {/* Level Badge */}
+      <div
+        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-['Inter'] text-[12px] font-bold text-[#a5b4fc] mb-3 ltr"
+        style={{
+          background: "rgba(20, 30, 60, 0.6)",
+          border: "1px solid rgba(99, 102, 241, 0.3)",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        <i className="fa-solid fa-paper-plane text-[10px]"></i>
+        {levelBadge}
       </div>
 
-      {/* English Sentence Display STRICT LTR */}
-      <div
-        dir="ltr"
-        className="text-3xl md:text-5xl font-extrabold tracking-wide leading-relaxed font-sans text-slate-400 flex flex-wrap items-center justify-center gap-x-2 gap-y-2 text-left"
-        style={{ direction: "ltr", unicodeBidi: "isolate" }}
+      {/* English Sentence */}
+      <h1
+        className="font-['Inter'] text-[46px] font-extrabold leading-[1.2] text-white tracking-tight mb-4 ltr text-left flex flex-wrap gap-x-3"
+        style={{
+          textShadow: "0 2px 10px rgba(0, 0, 0, 0.8)",
+        }}
       >
-        {tokens.map((token, tokenIdx) => {
-          if (!token) return null;
+        {words.length > 0 ? (
+          words.map((w, idx) => {
+            const wordText = w.text || w.word || "";
+            const isCyan = w.isCyan;
+            const isPurple = w.isPurple;
 
-          // If token is whitespace
-          if (/^\s+$/.test(token)) {
-            const spaceChars = token.split("");
             return (
-              <span key={`space-${tokenIdx}`} className="inline-flex">
-                {spaceChars.map((char) => {
-                  const charIdx = globalCharIndex++;
-                  const isTyped = charIdx < typedChars.length;
-                  const isCurrent = charIdx === currentIndex;
-                  const isError = errors[charIdx];
-
-                  let charClass = "char-pending";
-                  if (isTyped) {
-                    charClass = isError ? "char-incorrect" : "char-correct";
-                  }
-
-                  return (
-                    <span
-                      key={`char-${charIdx}`}
-                      className={`inline-block whitespace-pre transition-colors duration-150 ${charClass} ${
-                        isCurrent ? "char-cursor" : ""
-                      }`}
-                    >
-                      {char}
+              <span
+                key={idx}
+                className={`relative cursor-pointer transition-all duration-200 inline-block ${
+                  isCyan
+                    ? "text-[#00d2ff] border-b-4 border-[#00d2ff] pb-0.5"
+                    : isPurple
+                    ? "text-[#a855f7] border-b-4 border-[#a855f7] pb-0.5"
+                    : "hover:bg-white/10 rounded-md"
+                }`}
+                onMouseEnter={(e) => showPopCard(w, e.currentTarget)}
+                onMouseLeave={hidePopCard}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  showPopCard(w, e.currentTarget);
+                }}
+              >
+                {w.hasCaret ? (
+                  <>
+                    <span className="relative inline-block after:content-[''] after:absolute after:-bottom-[2px] after:left-0 after:w-full after:h-[3px] after:bg-[#00d2ff] after:rounded-full after:animate-pulse">
+                      {wordText.charAt(0)}
                     </span>
-                  );
-                })}
+                    {wordText.slice(1)}
+                  </>
+                ) : (
+                  wordText
+                )}
               </span>
             );
-          }
+          })
+        ) : (
+          <span>{currentLine?.text}</span>
+        )}
+      </h1>
 
-          // Word token: check if it matches a vocabulary word in currentLine.words or fallback to auto-word
-          const rawWord = token.replace(/[^a-zA-Z0-9]/g, "");
-          const cleanWord = rawWord.toLowerCase();
-          const matchedWordObj: StoryWord | null =
-            currentLine.words?.find((w) => w.word.toLowerCase() === cleanWord) ||
-            (rawWord
-              ? {
-                  id: `auto-${cleanWord}-${tokenIdx}`,
-                  word: rawWord,
-                  translationAr: "استمع للنطق الصوتي 🔊",
-                  ipa: "",
-                  partOfSpeech: "",
-                  cefrLevel: "A1",
-                }
-              : null);
+      {/* Pop Card Tooltip */}
+      <WordTooltip
+        word={activeCard.word}
+        pos={activeCard.pos}
+        meaning={activeCard.meaning}
+        hint={activeCard.hint}
+        active={activeCard.visible}
+        left={activeCard.left}
+        top={activeCard.top}
+        onMouseEnter={() => {
+          if (hideCardTimeout.current) clearTimeout(hideCardTimeout.current);
+        }}
+        onMouseLeave={hidePopCard}
+      />
 
-          const chars = token.split("");
-
-          return (
-            <span
-              key={`token-${tokenIdx}`}
-              className="inline-flex whitespace-nowrap px-1 py-0.5 rounded-lg transition-colors hover:bg-slate-800/80 cursor-pointer text-slate-200"
-              onMouseEnter={() => matchedWordObj && setHoveredWord(matchedWordObj)}
-              onMouseLeave={() => setHoveredWord(null)}
-              onClick={() => matchedWordObj && AudioService.playWord(matchedWordObj.word, 1.0)}
-            >
-              {chars.map((char) => {
-                const charIdx = globalCharIndex++;
-                const isTyped = charIdx < typedChars.length;
-                const isCurrent = charIdx === currentIndex;
-                const isError = errors[charIdx];
-
-                let charClass = "char-pending";
-                if (isTyped) {
-                  charClass = isError ? "char-incorrect" : "char-correct";
-                }
-
-                return (
-                  <span
-                    key={`char-${charIdx}`}
-                    className={`inline-block transition-colors duration-150 ${charClass} ${
-                      isCurrent ? "char-cursor" : ""
-                    }`}
-                  >
-                    {char}
-                  </span>
-                );
-              })}
-            </span>
-          );
-        })}
-      </div>
-
-      {/* Arabic Translation Subtitle RTL */}
-      <div className="mt-6 text-xl md:text-2xl font-arabic font-bold text-sky-400 tracking-wide dir-rtl">
-        {currentLine.translationAr}
-      </div>
+      {/* Arabic Translation */}
+      {arabicTranslation && (
+        <div className="flex flex-col items-start gap-2 text-[24px] font-bold text-[#00d2ff] rtl text-right">
+          <span style={{ textShadow: "0 2px 12px rgba(0, 0, 0, 0.9)" }}>
+            {arabicTranslation}
+          </span>
+          <div
+            className="w-[60px] h-[3px] rounded-full"
+            style={{
+              background: "linear-gradient(90deg, #00d2ff, #a855f7)",
+              boxShadow: "0 0 10px #00d2ff",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
