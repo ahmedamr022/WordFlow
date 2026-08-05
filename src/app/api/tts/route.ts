@@ -1,47 +1,74 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import {
+  requireUser,
+  enforceRateLimit,
+  toResponse,
+  RATE_LIMITS,
+  HttpError } from
+"@/lib/auth/guards";
+import { ttsRequestSchema } from "@/lib/validation/schemas";
+import { serverEnv } from "@/lib/env";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const text = searchParams.get("text") || "Hello";
-  const voice = searchParams.get("voice") || "af_heart";
+/**
+ * إصلاحات مقابل النسخة الحالية:
+ *  · الراوت كان مفتوحاً لأي زائر مجهول ⇒ requireUser() الآن إلزامي
+ *  · لا rate limiting ⇒ 200 طلب/ساعة لكل مستخدم
+ *  · نص المستخدم كان يُحقن مباشرة في URL طرف ثالث ⇒ تحقق بـ zod + قائمة أصوات مسموحة
+ */
 
+const ALLOWED_VOICES = new Set([
+"af_heart",
+"af_bella",
+"am_michael",
+"bf_emma",
+"bm_george"]
+);
+
+export async function POST(request: NextRequest) {
   try {
-    // Official Real Kokoro 82M Neural Audio Generation API
-    const hfKokoroUrl = `https://api-inference.huggingface.co/models/hexgrad/Kokoro-82M`;
+    const user = await requireUser();
+    await enforceRateLimit("tts", user.id, RATE_LIMITS.tts);
 
-    // Direct High Quality Audio API Fallback with Distinct Real Voices
-    const realAudioUrl = `https://tts.readaloud.net/v1/speak?text=${encodeURIComponent(
-      text
-    )}&lang=en-US&voice=${encodeURIComponent(voice)}`;
-
-    const res = await fetch(realAudioUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-    });
-
-    if (!res.ok) {
-      // Direct Real High Bitrate Neural TTS Stream
-      const directStreamUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(
-        text
-      )}&type=2`;
-      const fallbackRes = await fetch(directStreamUrl);
-      const audioBuffer = await fallbackRes.arrayBuffer();
-      return new NextResponse(audioBuffer, {
-        headers: { "Content-Type": "audio/mpeg" },
-      });
+    const body = await request.json().catch(() => null);
+    const parsed = ttsRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new HttpError(400, parsed.error.issues[0]?.message ?? "طلب غير صالح");
+    }
+    if (!ALLOWED_VOICES.has(parsed.data.voiceId)) {
+      throw new HttpError(400, "الصوت المطلوب غير مسموح");
     }
 
-    const audioBuffer = await res.arrayBuffer();
-    return new NextResponse(audioBuffer, {
+    const env = serverEnv();
+    if (!env.KOKORO_API_URL) throw new HttpError(503, "خدمة الصوت غير مهيأة");
+
+    const upstream = await fetch(new URL("/v1/audio/speech", env.KOKORO_API_URL), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input: parsed.data.text,
+        voice: parsed.data.voiceId,
+        response_format: "mp3"
+      }),
+      cache: "no-store"
+    });
+
+    if (!upstream.ok || !upstream.body) {
+      throw new HttpError(502, "تعذر توليد الصوت");
+    }
+
+    void createAdminClient().
+    from("ai_usage_log").
+    insert({ user_id: user.id, route: "/api/tts", prompt_tokens: parsed.data.text.length }).
+    then(() => undefined);
+
+    return new Response(upstream.body, {
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "public, max-age=86400",
-      },
+        "Cache-Control": "private, max-age=3600"
+      }
     });
-  } catch (error) {
-    console.error("Kokoro TTS API Error:", error);
-    return NextResponse.json({ error: "Failed to generate Kokoro speech" }, { status: 500 });
+  } catch (err) {
+    return toResponse(err);
   }
 }

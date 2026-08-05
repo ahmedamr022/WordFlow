@@ -1,39 +1,34 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
+/**
+ * النسخة القديمة كانت تعمل signOut لأي مستخدم OAuth بلا صف profiles —
+ * أي أن كل مستخدم جديد بجوجل كان مسدوداً تماماً.
+ *
+ * الآن الـ trigger on_auth_user_created يضمن وجود الصف لحظة إنشاء الحساب،
+ * فيبقى دور هذا الراوت مجرد تبادل الكود ثم التوجيه.
+ */
+export async function GET(request: NextRequest) {
+  const { searchParams, origin } = request.nextUrl;
   const code = searchParams.get("code");
 
-  if (code) {
-    const supabase = await createClient();
-    const { data: { session }, error } = await supabase.auth.exchangeCodeForSession(code);
-
-    if (!error && session?.user) {
-      // التحقق من وجود حساب المستخدم في database
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id, nickname, english_level")
-        .eq("id", session.user.id)
-        .single();
-
-      // إذا لم يكن البروفايل موجوداً في قاعدة البيانات
-      if (!profile) {
-        // إنهاء الجلسة حتى لا يظل مسجلاً
-        await supabase.auth.signOut();
-        const errorMessage = encodeURIComponent("الحساب غير موجود لدينا. يرجى إنشاء حساب جديد أولاً.");
-        return NextResponse.redirect(`${origin}/login?error=${errorMessage}`);
-      }
-
-      // إذا كان الحساب موجوداً ومكتملاً
-      if (profile.nickname && profile.english_level) {
-        return NextResponse.redirect(`${origin}/dashboard`);
-      }
-
-      // إذا كان الحساب غير مكتمل البيانات يوجه للـ onboarding
-      return NextResponse.redirect(`${origin}/onboarding/nickname`);
-    }
+  if (!code) {
+    return NextResponse.redirect(`${origin}/login?error=missing_code`);
   }
 
-  return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent("حدث خطأ أثناء تسجيل الدخول.")}`);
+  const supabase = await createClient();
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (error || !data.user) {
+    return NextResponse.redirect(`${origin}/login?error=oauth_failed`);
+  }
+
+  const { data: profile } = await supabase.
+  from("profiles").
+  select("onboarding_completed_at").
+  eq("id", data.user.id).
+  maybeSingle();
+
+  const destination = profile?.onboarding_completed_at ? "/dashboard" : "/onboarding";
+  return NextResponse.redirect(`${origin}${destination}`);
 }
