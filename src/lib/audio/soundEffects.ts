@@ -16,15 +16,13 @@ class SoundEffectsClass {
     return this.audioCtx;
   }
 
-  // Crisp mechanical keypress click (Satisfying mechanical switch sound)
+  // Soft mechanical keypress click
   public playKeyClick() {
     try {
       const ctx = this.getContext();
       if (!ctx) return;
 
       const now = ctx.currentTime;
-
-      // Click snap (short filtered noise burst)
       const bufferSize = ctx.sampleRate * 0.015; // 15ms
       const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
       const data = buffer.getChannelData(0);
@@ -47,7 +45,6 @@ class SoundEffectsClass {
       filter.connect(gain);
       gain.connect(ctx.destination);
 
-      // Low mechanical pop body
       const osc = ctx.createOscillator();
       const oscGain = ctx.createGain();
       osc.type = "triangle";
@@ -69,7 +66,33 @@ class SoundEffectsClass {
     }
   }
 
-  // Bright word success chime (Ascending 2-note C5 -> G5 chord on word completion)
+  // Error pop sound
+  public playKeyError() {
+    try {
+      const ctx = this.getContext();
+      if (!ctx) return;
+
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.08);
+
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.08);
+    } catch {
+      // Ignore audio errors
+    }
+  }
+
+  // Bright word success chime
   public playWordSuccess() {
     try {
       const ctx = this.getContext();
@@ -77,7 +100,7 @@ class SoundEffectsClass {
 
       const now = ctx.currentTime;
 
-      // Note 1: C5 (523Hz)
+      // C5 (523.25Hz)
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
       osc1.type = "sine";
@@ -91,7 +114,7 @@ class SoundEffectsClass {
       osc1.start(now);
       osc1.stop(now + 0.14);
 
-      // Note 2: G5 (783Hz)
+      // G5 (783.99Hz)
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
       osc2.type = "sine";
@@ -109,7 +132,7 @@ class SoundEffectsClass {
     }
   }
 
-  // Full Line Completion Triumph Chime (C5 -> E5 -> G5 major chord)
+  // Full Line Completion Triumph Chime
   public playLineSuccess() {
     try {
       const ctx = this.getContext();

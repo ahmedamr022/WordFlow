@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { StoryLine, TypingMetrics } from "@/types";
-import { SoundEffects } from "@/lib/audio/soundEffects";
+import { StoryLine, TypingMetrics } from "../types";
+import { SoundEffects } from "../lib/audio/soundEffects";
 
 interface UseTypingEngineProps {
   lines: StoryLine[];
@@ -24,11 +24,9 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
 
   const inputRef = useRef<HTMLInputElement>(null);
   const completedWordsCount = useRef(0);
+  const advanceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // حماية من الحالات التي تكون فيها مصفوفة lines فارغة أو غير معرّفة
   const currentLine = lines && lines.length > 0 ? lines[currentLineIndex] : undefined;
-
-  // الحماية من قراءة text من undefined
   const rawTargetText = currentLine?.text || "";
   const targetText = rawTargetText.replace(/[.,!?;:'"”-]+$/g, "");
 
@@ -50,15 +48,46 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
     }
   }, []);
 
+  const resetLine = useCallback(() => {
+    if (advanceTimeout.current) clearTimeout(advanceTimeout.current);
+    resetState();
+  }, [resetState]);
+
   const restart = useCallback(() => {
+    if (advanceTimeout.current) clearTimeout(advanceTimeout.current);
     setCurrentLineIndex(0);
     setIsCompleted(false);
     resetState();
   }, [resetState]);
 
+  const goToLine = useCallback(
+    (index: number) => {
+      if (!lines || lines.length === 0) return;
+      const next = Math.max(0, Math.min(index, lines.length - 1));
+      if (advanceTimeout.current) clearTimeout(advanceTimeout.current);
+      setIsCompleted(false);
+      setCurrentLineIndex(next);
+    },
+    [lines]
+  );
+
+  const goNext = useCallback(() => {
+    goToLine(currentLineIndex + 1);
+  }, [currentLineIndex, goToLine]);
+
+  const goPrev = useCallback(() => {
+    goToLine(currentLineIndex - 1);
+  }, [currentLineIndex, goToLine]);
+
   useEffect(() => {
     resetState();
   }, [currentLineIndex, resetState]);
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimeout.current) clearTimeout(advanceTimeout.current);
+    };
+  }, []);
 
   const processInput = useCallback(
     (val: string) => {
@@ -70,34 +99,51 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
 
       if (val.length > targetText.length) return;
 
-      if (val.length > typedChars.length) {
-        SoundEffects.playKeyClick();
-      }
-
       const newErrors = val
         .split("")
         .map((char, index) => char.toLowerCase() !== targetText[index]?.toLowerCase());
 
+      if (val.length > typedChars.length) {
+        if (newErrors[val.length - 1]) {
+          SoundEffects.playKeyError();
+        } else {
+          SoundEffects.playKeyClick();
+        }
+      }
+
       setTypedChars(val);
       setErrors(newErrors);
 
-      const typedWords = val.trim().split(/\s+/).filter(Boolean);
-      const targetWords = targetText.split(/\s+/).filter(Boolean);
+      // تنظيف الكلمات والمقارنة الدقيقة لتفعيل صوت صحة الكلمة (Word Success Sound)
+      const cleanTargetWords = targetText
+        .split(/\s+/)
+        .map((w) => w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())
+        .filter(Boolean);
+
+      const isSpaceOrEnd = val.endsWith(" ") || val.length === targetText.length;
+      const currentTypedWords = val
+        .trim()
+        .split(/\s+/)
+        .map((w) => w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())
+        .filter(Boolean);
 
       let currentCompletedWords = 0;
-      typedWords.forEach((word, idx) => {
-        if (
-          targetWords[idx] &&
-          word.toLowerCase() === targetWords[idx].toLowerCase().replace(/[.,!?;:'"”-]/g, "")
-        ) {
-          currentCompletedWords++;
+      currentTypedWords.forEach((word, idx) => {
+        if (cleanTargetWords[idx] && word === cleanTargetWords[idx]) {
+          if (idx < currentTypedWords.length - 1 || isSpaceOrEnd) {
+            currentCompletedWords++;
+          }
         }
       });
 
-      if (currentCompletedWords > completedWordsCount.current) {
-        completedWordsCount.current = currentCompletedWords;
+      // تشغيل الصوت عند اكتمال كلمة جديدة فقط بشرط ألا تكون الكلمة الأخيرة بالجملة
+      if (
+        currentCompletedWords > completedWordsCount.current &&
+        currentCompletedWords < cleanTargetWords.length
+      ) {
         SoundEffects.playWordSuccess();
       }
+      completedWordsCount.current = currentCompletedWords;
 
       const totalTyped = val.length;
       const errorCount = newErrors.filter(Boolean).length;
@@ -108,7 +154,7 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
       let elapsedSeconds = 0;
       if (startTime) {
         elapsedSeconds = Math.max(1, (Date.now() - startTime) / 1000);
-        wpm = Math.round((correctTyped / 5) / (elapsedSeconds / 60));
+        wpm = Math.round(correctTyped / 5 / (elapsedSeconds / 60));
       }
 
       setMetrics({
@@ -120,19 +166,21 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
         timeSpentSeconds: Math.round(elapsedSeconds),
       });
 
-      const cleanTyped = val.toLowerCase().replace(/[.,!?;:'"”-]/g, "").trim();
-      const cleanTarget = targetText.toLowerCase().replace(/[.,!?;:'"”-]/g, "").trim();
+      const cleanTyped = val.toLowerCase().replace(/[^a-zA-Z0-9]/g, "").trim();
+      const cleanTarget = targetText.toLowerCase().replace(/[^a-zA-Z0-9]/g, "").trim();
 
+      // عند إنهاء السطر كاملاً بنجاح
       if (cleanTyped === cleanTarget && cleanTarget.length > 0) {
-        SoundEffects.playLineSuccess();
-        setTimeout(() => {
+        SoundEffects.playLineSuccess(); // تشغيل صوت النجاح المميز في نهاية الجملة
+        if (advanceTimeout.current) clearTimeout(advanceTimeout.current);
+        advanceTimeout.current = setTimeout(() => {
           if (currentLineIndex < lines.length - 1) {
             setCurrentLineIndex((prev) => prev + 1);
           } else {
             setIsCompleted(true);
             onComplete?.();
           }
-        }, 1500);
+        }, 1200);
       }
     },
     [targetText, isCompleted, startTime, typedChars.length, currentLineIndex, lines.length, onComplete]
@@ -144,13 +192,26 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
       if (e.key === "Backspace") {
+        e.preventDefault();
         processInput(typedChars.slice(0, -1));
-      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        return;
+      }
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        resetLine();
+        return;
+      }
+
+      if (e.key.length === 1 && e.key !== "\\") {
+        e.preventDefault();
         processInput(typedChars + e.key);
       }
     },
-    [typedChars, processInput]
+    [typedChars, processInput, resetLine]
   );
 
   const focusInput = () => {
@@ -159,9 +220,12 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
     }
   };
 
+  const isLineComplete = typedChars.length > 0 && typedChars.length === targetText.length;
+
   return {
     currentLineIndex,
     currentLine,
+    targetText,
     inputRef,
     typedChars,
     errors,
@@ -170,7 +234,12 @@ export function useTypingEngine({ lines, onComplete }: UseTypingEngineProps) {
     handleKeyDown,
     focusInput,
     metrics,
+    isLineComplete,
     isCompleted,
+    resetLine,
     restart,
+    goToLine,
+    goNext,
+    goPrev,
   };
 }

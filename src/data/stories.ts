@@ -12,6 +12,7 @@ export interface ExtendedStory extends Story {
   descriptionAr: string;
   descriptionEn: string;
   coverImage: string;
+  bgImage?: string; // إضافة خاصية الصورة الخلفية
 }
 
 export interface StoryItem {
@@ -24,14 +25,14 @@ export interface StoryItem {
   xp: string;
   progress?: number;
   cover: string;
+  bgImage?: string;
   isNew?: boolean;
   isLocked?: boolean;
 }
 
-// 🌟 الآن يحتوي MAIN_STORIES على جميع القصص (12 قصة) ليفعل كارت "+X المزيد" تلقائياً
 export const MAIN_STORIES: StoryItem[] = [
   {
-    id: "titanic",
+    id: "titanic-legend",
     titleEn: "The Legend of Titanic",
     titleAr: "أسطورة السفينة التايتانيك",
     level: "B1",
@@ -39,11 +40,12 @@ export const MAIN_STORIES: StoryItem[] = [
     rating: "4.9",
     xp: "250 XP",
     progress: 65,
-    cover: "/images/titanic.jpg",
+    cover: "/images/stories/story1/1.jpg",
+    bgImage: "/images/stories/story1/background.png",
     isNew: true,
   },
   {
-    id: "sherlock",
+    id: "sherlock-holmes",
     titleEn: "Sherlock Holmes",
     titleAr: "مغامرات هولمز",
     level: "B2",
@@ -51,10 +53,12 @@ export const MAIN_STORIES: StoryItem[] = [
     rating: "4.8",
     xp: "220 XP",
     progress: 40,
-    cover: "/images/sherlock.jpg",
+    cover: "/images/stories/story2/1.jpg",
+    bgImage: "/images/stories/story2/background.png",
+    isNew: true,
   },
   {
-    id: "gatsby",
+    id: "great-gatsby",
     titleEn: "The Great Gatsby",
     titleAr: "غاتسبي العظيم",
     level: "B1",
@@ -62,10 +66,11 @@ export const MAIN_STORIES: StoryItem[] = [
     rating: "4.7",
     xp: "200 XP",
     progress: 30,
-    cover: "/images/gatsby.jpg",
+    cover: "/images/stories/story3/1.jpg",
+    bgImage: "/images/stories/story3/background.png",
   },
   {
-    id: "pride",
+    id: "pride-prejudice",
     titleEn: "Pride & Prejudice",
     titleAr: "كبرياء وتحامل",
     level: "B1",
@@ -73,7 +78,8 @@ export const MAIN_STORIES: StoryItem[] = [
     rating: "4.6",
     xp: "180 XP",
     progress: 55,
-    cover: "/images/pride.jpg",
+    cover: "/images/stories/story4/1.jpg",
+    bgImage: "/images/stories/story4/background.png",
   },
   {
     id: "romeo-juliet",
@@ -83,7 +89,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "9 دقيقة",
     rating: "4.8",
     xp: "190 XP",
-    cover: "/images/romeo.jpg",
+    cover: "/images/stories/story5/1.jpg",
+    bgImage: "/images/stories/story5/background.png",
   },
   {
     id: "ready-to-learn",
@@ -93,7 +100,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "5 دقيقة",
     rating: "4.5",
     xp: "120 XP",
-    cover: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=800",
+    cover: "/images/stories/story6/1.jpg",
+    bgImage: "/images/stories/story6/background.png",
   },
   {
     id: "keep-going",
@@ -103,7 +111,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "6 دقيقة",
     rating: "4.7",
     xp: "130 XP",
-    cover: "https://images.unsplash.com/photo-1499750310107-5fef28a66643?q=80&w=800",
+    cover: "/images/stories/story7/1.jpg",
+    bgImage: "/images/stories/story7/background.png",
   },
   {
     id: "magic-bookshelf",
@@ -113,7 +122,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "7 دقيقة",
     rating: "4.6",
     xp: "140 XP",
-    cover: "/images/bookshelf.jpg",
+    cover: "/images/stories/story8/1.jpg",
+    bgImage: "/images/stories/story8/background.png",
   },
   {
     id: "the-letter",
@@ -123,7 +133,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "8 دقيقة",
     rating: "4.4",
     xp: "150 XP",
-    cover: "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800",
+    cover: "/images/stories/story9/1.jpg",
+    bgImage: "/images/stories/story9/background.png",
   },
   {
     id: "night-in-cairo",
@@ -133,7 +144,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "10 دقيقة",
     rating: "4.9",
     xp: "180 XP",
-    cover: "/images/cairo.jpg",
+    cover: "/images/stories/story10/1.jpg",
+    bgImage: "/images/stories/story10/background.png",
   },
   {
     id: "moby-dick",
@@ -143,7 +155,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "14 دقيقة",
     rating: "4.5",
     xp: "210 XP",
-    cover: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?q=80&w=800",
+    cover: "/images/stories/story11/1.jpg",
+    bgImage: "/images/stories/story11/background.png",
   },
   {
     id: "alice-wonderland",
@@ -153,7 +166,8 @@ export const MAIN_STORIES: StoryItem[] = [
     duration: "11 دقيقة",
     rating: "4.8",
     xp: "160 XP",
-    cover: "https://images.unsplash.com/photo-1512820790803-83ca734da794?q=80&w=800",
+    cover: "/images/stories/story12/1.jpg",
+    bgImage: "/images/stories/story12/background.png",
   },
 ];
 
@@ -166,7 +180,8 @@ export const RECOMMENDED_STORIES_DATA: StoryItem[] = [
     duration: "7 دقيقة",
     rating: "4.5",
     xp: "150 XP",
-    cover: "/images/time-machine.png",
+    cover: "/images/stories/story13/1.jpg",
+    bgImage: "/images/stories/story13/background.png",
     isLocked: true,
   },
   {
@@ -177,7 +192,8 @@ export const RECOMMENDED_STORIES_DATA: StoryItem[] = [
     duration: "11 دقيقة",
     rating: "4.5",
     xp: "170 XP",
-    cover: "/images/jekyll.png",
+    cover: "/images/stories/story14/1.jpg",
+    bgImage: "/images/stories/story14/background.png",
     isLocked: true,
   },
   {
@@ -188,7 +204,8 @@ export const RECOMMENDED_STORIES_DATA: StoryItem[] = [
     duration: "9 دقيقة",
     rating: "4.4",
     xp: "160 XP",
-    cover: "/images/oz.png",
+    cover: "/images/stories/story15/1.jpg",
+    bgImage: "/images/stories/story15/background.png",
     isLocked: true,
   },
   {
@@ -199,7 +216,8 @@ export const RECOMMENDED_STORIES_DATA: StoryItem[] = [
     duration: "13 دقيقة",
     rating: "4.4",
     xp: "190 XP",
-    cover: "/images/frankenstein.png",
+    cover: "/images/stories/story16/1.jpg",
+    bgImage: "/images/stories/story16/background.png",
     isLocked: true,
   },
   {
@@ -210,7 +228,8 @@ export const RECOMMENDED_STORIES_DATA: StoryItem[] = [
     duration: "10 دقيقة",
     rating: "4.3",
     xp: "150 XP",
-    cover: "/images/student.jpg",
+    cover: "/images/stories/story17/1.jpg",
+    bgImage: "/images/stories/story17/background.png",
     isLocked: true,
   },
 ];
@@ -232,7 +251,7 @@ export const SAMPLE_COURSES: Course[] = [
     descriptionAr: "قصص ملهمة لتبدأ بها خطوتك الأولى في اللغة الإنجليزية بكل ثقة.",
     cefrLevel: "A1",
     storyCount: 3,
-    coverImage: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=800&auto=format&fit=crop",
+    coverImage: "/images/stories/story6/1.jpg",
     stories: [
       {
         id: "ready-to-learn",
@@ -245,7 +264,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 3,
         descriptionAr: "خطوتك الأولى لبناء عادة يومية متينة وممتعة في قراءة وكتابة اللغة الإنجليزية بثقة.",
         descriptionEn: "Your first step to build a strong daily habit of writing and reading English.",
-        coverImage: "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?q=80&w=800&auto=format&fit=crop",
+        coverImage: "/images/stories/story6/1.jpg",
         lines: [
           {
             id: 1,
@@ -319,7 +338,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 3,
         descriptionAr: "الاستمرارية هي سر التطور. اقرأ عن أهمية الخطوات الصغيرة في تحقيق الأهداف العظيمة.",
         descriptionEn: "Consistency is the key to progress. Read about small steps towards big goals.",
-        coverImage: "https://images.unsplash.com/photo-1499750310107-5fef28a66643?q=80&w=800&auto=format&fit=crop",
+        coverImage: "/images/stories/story7/1.jpg",
         lines: [
           {
             id: 1,
@@ -382,7 +401,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 3,
         descriptionAr: "عن شغف القراءة واكتشاف عوالم ومعارف جديدة في أوقات المساء الهادئة.",
         descriptionEn: "Discovering new worlds and quiet evening knowledge through reading.",
-        coverImage: "/images/bookshelf.jpg",
+        coverImage: "/images/stories/story8/1.jpg",
         lines: [
           {
             id: 1,
@@ -445,7 +464,7 @@ export const SAMPLE_COURSES: Course[] = [
     descriptionAr: "مواقف واقعية ترفع حصيلتك من الكلمات والمفردات المستعملة يومياً.",
     cefrLevel: "A2",
     storyCount: 2,
-    coverImage: "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800&auto=format&fit=crop",
+    coverImage: "/images/stories/story9/1.jpg",
     stories: [
       {
         id: "the-letter",
@@ -458,7 +477,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 4,
         descriptionAr: "رسالة هادئة وصلت في الصباح الباكر، لتسرد قصة مليئة بالمشاعر والترقب.",
         descriptionEn: "A quiet morning letter arriving to unlock a story full of subtle excitement.",
-        coverImage: "https://images.unsplash.com/photo-1517842645767-c639042777db?q=80&w=800&auto=format&fit=crop",
+        coverImage: "/images/stories/story9/1.jpg",
         lines: [
           {
             id: 1,
@@ -526,7 +545,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 4,
         descriptionAr: "سحر النيل والنجوم المتلألئة في شوارع القاهرة القديمة وأجوائها الدافئة.",
         descriptionEn: "The magical sparkling Nile and warm breezes of ancient Cairo night streets.",
-        coverImage: "/images/cairo.jpg",
+        coverImage: "/images/stories/story10/1.jpg",
         lines: [
           {
             id: 1,
@@ -594,7 +613,7 @@ export const SAMPLE_COURSES: Course[] = [
     descriptionAr: "قصص تاريخية عالمية ملهمة ومصممة بحصيلة لغوية راقية.",
     cefrLevel: "B1",
     storyCount: 5,
-    coverImage: "/images/titanic.jpg",
+    coverImage: "/images/stories/story1/1.jpg",
     stories: [
       {
         id: "titanic-legend",
@@ -607,7 +626,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 5,
         descriptionAr: "قصة السفينة العملاقة التي أبحرت عبر المحيط لتبقى أسطورتها خالدة في تاريخ البشرية.",
         descriptionEn: "The legendary story of the grand ship sailing the ocean, forever in human history.",
-        coverImage: "/images/titanic.jpg",
+        coverImage: "/images/stories/story1/1.jpg",
         lines: [
           {
             id: 1,
@@ -706,7 +725,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 5,
         descriptionAr: "تحقيقات الشيرلوك هولمز الذكية في شوارع لندن الضبابية.",
         descriptionEn: "Brilliant mystery investigations in misty London streets.",
-        coverImage: "/images/sherlock.jpg",
+        coverImage: "/images/stories/story2/1.jpg",
         lines: [
           {
             id: 1,
@@ -789,7 +808,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 4,
         descriptionAr: "أجواء العشرينيات الساحرة وقصة الطموح والأمل.",
         descriptionEn: "The roaring twenties ambient story of ambition and hope.",
-        coverImage: "/images/gatsby.jpg",
+        coverImage: "/images/stories/story3/1.jpg",
         lines: [
           {
             id: 1,
@@ -873,7 +892,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 4,
         descriptionAr: "روائع الأدب الكلاسيكي وقصص المشاعر العميقة.",
         descriptionEn: "Classic romance and deep emotional journeys.",
-        coverImage: "/images/pride.jpg",
+        coverImage: "/images/stories/story4/1.jpg",
         lines: [
           {
             id: 1,
@@ -952,7 +971,7 @@ export const SAMPLE_COURSES: Course[] = [
         estimatedMinutes: 4,
         descriptionAr: "الأسطورة الكلاسيكية الخالدة في تاريخ الحب والأدب.",
         descriptionEn: "The timeless classical love story of Verona.",
-        coverImage: "/images/romeo.jpg",
+        coverImage: "/images/stories/story5/1.jpg",
         lines: [
           {
             id: 1,
@@ -1027,9 +1046,43 @@ export const SAMPLE_COURSES: Course[] = [
 ];
 
 export function getStoryById(storyId: string): ExtendedStory | undefined {
+  let story: Story | undefined;
+
   for (const course of SAMPLE_COURSES) {
     const found = course.stories.find((s) => s.id === storyId);
-    if (found) return found as ExtendedStory;
+    if (found) {
+      story = found;
+      break;
+    }
   }
+
+  if (story) {
+    // يستخرج المسار الأب للصورة الرئيسية لمقابلة مجلد القصة وتعيين الخلفية
+    const folderPath = story.coverImage ? story.coverImage.substring(0, story.coverImage.lastIndexOf("/")) : "";
+    return {
+      ...story,
+      bgImage: folderPath ? `${folderPath}/background.png` : undefined,
+    } as ExtendedStory;
+  }
+
+  const mainStory = MAIN_STORIES.find((s) => s.id === storyId);
+  if (mainStory) {
+    return {
+      id: mainStory.id,
+      title: mainStory.titleEn,
+      titleAr: mainStory.titleAr,
+      courseId: "main-stories",
+      cefrLevel: mainStory.level as any,
+      totalLines: 0,
+      totalWords: 0,
+      estimatedMinutes: parseInt(mainStory.duration) || 5,
+      descriptionAr: "قصة ممتعة لتطوير مهاراتك في اللغة الإنجليزية.",
+      descriptionEn: "An engaging story to build your English skills.",
+      coverImage: mainStory.cover,
+      bgImage: mainStory.bgImage || mainStory.cover.replace("/1.jpg", "/background.png"),
+      lines: [],
+    } as ExtendedStory;
+  }
+
   return undefined;
 }
