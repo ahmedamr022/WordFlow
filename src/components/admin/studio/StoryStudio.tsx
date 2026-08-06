@@ -38,27 +38,6 @@ import type {
   SurfaceKey } from
 "@/types/admin";
 
-/**
- * Story Studio — إعادة تنظيم كاملة للتجربة.
- *
- * ── ما كان يشتّت ─────────────────────────────────────────────────────────────
- * ١) **أربعة أعمدة تعمل في نفس اللحظة**: تبويبات + محرّر + معاينة + لوح مظهر
- *    دائم. عدد الأزرار المرئية في الشاشة كان يقارب الثلاثين.
- * ٢) **تكرار حقيقي**: تبويب «المظهر» كان صفحة شرح فقط بينما أدوات المظهر تعيش
- *    في عمود رابع دائم، وحقول «الوصول» مكرّرة بين تبويبها ولوح أسفل المعاينة.
- * ٣) **التبويبات تهرب مع التمرير**: كانت في مجرى الصفحة، فبمجرد النزول في قائمة
- *    الجُمل تختفي من الشاشة ولا تعرف أين أنت.
- *
- * ── الشكل الجديد ─────────────────────────────────────────────────────────────
- *   [شريط أوامر ثابت]           ← رجوع · حالة الحفظ · حفظ · معاينة · نشر
- *   [شريط خطوات ثابت]           ← ٦ خطوات مرقّمة، دائماً ظاهرة
- *   [منطقة العمل]               ← عمود واحد للخطوة الحالية + معاينة على اليسار
- *
- * الاستوديو صار لوحاً بارتفاع الشاشة والتمرير **داخل الأعمدة** لا في الصفحة،
- * فشريط الخطوات لا يغيب أبداً. وكل خطوة لها مكان واحد لا يتكرر في غيره:
- * المظهر داخل خطوته، والوصول داخل خطوته، والحفظ في شريط الأوامر وحده.
- */
-
 const STEPS = [
 {
   key: "information" as const,
@@ -129,7 +108,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publishing, startPublish] = useTransition();
 
-  // Ctrl/⌘ + S = حفظ فوري.
   React.useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -179,16 +157,28 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
 
   const missingTitle = draft.titleEn.trim().length === 0;
   const missingSentences = draft.sentences.length === 0;
+  const missingCover = !draft.coverImage;
+
+  const completion = {
+    information: !missingTitle,
+    sentences: !missingSentences,
+    media: !missingCover,
+    appearance: true,
+    access: true,
+    history: true
+  } as Record<StepKey, boolean>;
+
+  const completedCount = Object.values(completion).filter(Boolean).length;
+  const readinessPercent = Math.round(completedCount / STEPS.length * 100);
 
   return (
     <div className="flex h-[calc(100vh-132px)] min-h-[620px] flex-col gap-3">
-      {/* ── شريط الأوامر (ثابت) ──────────────────────────────────────────── */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-[18px] border border-white/[0.06] bg-[#090F18]/85 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/admin/stories"
-            aria-label="رجوع إلى القصص"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] text-slate-300 transition-colors hover:text-white">
+            aria-label="رجود إلى القصص"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.07] text-slate-300 transition-colors hover:border-white/20 hover:text-white">
 
             <ArrowRightIcon className="h-4 w-4" />
           </Link>
@@ -203,6 +193,7 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
               draft.status === "draft" ?
               "مسودة" :
               "مقفلة"}
+              {" · "}{readinessPercent}% جاهزة
             </p>
           </div>
         </div>
@@ -239,7 +230,7 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
           <Link
             href={`/story/${story.slug}`}
             target="_blank"
-            className="flex items-center gap-2 rounded-xl border border-white/[0.09] bg-[#0B111C] px-3.5 py-2.5 text-[12.5px] font-bold text-slate-200 transition-colors hover:text-white">
+            className="flex items-center gap-2 rounded-xl border border-white/[0.09] bg-[#0B111C] px-3.5 py-2.5 text-[12.5px] font-bold text-slate-200 transition-colors hover:border-white/20 hover:text-white">
 
             <EyeIcon className="h-4 w-4" />
             معاينة في الموقع
@@ -251,7 +242,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
         </div>
       </header>
 
-      {/* ── شريط الخطوات (ثابت — لا يغيب مع التمرير) ─────────────────────── */}
       <nav
         aria-label="خطوات إعداد القصة"
         className="flex shrink-0 items-stretch gap-1.5 overflow-x-auto rounded-[16px] border border-white/[0.06] bg-[#090F18]/85 p-1.5">
@@ -259,9 +249,8 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
         {STEPS.map((item, index) => {
           const Icon = item.icon;
           const active = step === item.key;
-          const warn =
-          item.key === "information" && missingTitle ||
-          item.key === "sentences" && missingSentences;
+          const done = completion[item.key] && !active;
+          const warn = !completion[item.key];
 
           return (
             <button
@@ -272,16 +261,25 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
               className={`flex shrink-0 items-center gap-2.5 rounded-[12px] px-3.5 py-2.5 text-[12.5px] font-bold transition-all ${
               active ?
               "border border-cyan-400/30 bg-cyan-500/10 text-white" :
+              done ?
+              "border border-emerald-500/15 bg-emerald-500/[0.04] text-slate-300" :
               "border border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-100"}`
               }>
 
               <span
                 className={`font-en flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black ${
-                active ? "bg-cyan-400/20 text-cyan-200" : "bg-white/[0.06] text-slate-500"}`
+                active ?
+                "bg-cyan-400/20 text-cyan-200" :
+                done ?
+                "bg-emerald-500/15 text-emerald-300" :
+                "bg-white/[0.06] text-slate-500"}`
                 }
                 aria-hidden>
 
-                {index + 1}
+                {done ?
+                <CheckIcon className="h-3 w-3" /> :
+                index + 1
+                }
               </span>
               <Icon className="h-4 w-4" aria-hidden />
               {item.label}
@@ -291,7 +289,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
                 aria-label="يحتاج إكمالاً" />
               }
             </button>);
-
         })}
       </nav>
 
@@ -301,7 +298,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
         </p>
       }
 
-      {/* ── منطقة العمل: خطوة واحدة + معاينة ────────────────────────────── */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto pl-1 [scrollbar-width:thin]">
           <div className="flex items-center gap-2 px-1">
@@ -325,7 +321,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
 
           }
 
-          {/* أدوات المظهر تعيش داخل خطوتها — لا عمود دائم ولا تبويب شرح فارغ */}
           {step === "appearance" &&
           <AppearancePanel
             draft={draft}
@@ -350,7 +345,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
 
           }
 
-          {/* تنقّل الخطوات — الزرّان الوحيدان أسفل المحرّر */}
           <div className="mt-auto flex shrink-0 items-center justify-between gap-3 rounded-[16px] border border-white/[0.06] bg-[#090F18]/85 px-4 py-3">
             <div>
               {previousStep ?
@@ -382,7 +376,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
           </div>
         </div>
 
-        {/* المعاينة — مرجع بصري ثابت بلا أدوات تحرير */}
         <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto [scrollbar-width:thin]">
           <LivePreview
             draft={draft}
@@ -393,6 +386,9 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
 
 
           <div className="rounded-[16px] border border-white/[0.06] bg-[#090F18]/85 px-4 py-3">
+            <p className="mb-2.5 text-[11px] font-black uppercase tracking-wider text-slate-500">
+              ملخص القصة
+            </p>
             <ul className="flex flex-col gap-2 text-[11.5px] text-slate-400">
               <li className="flex items-center justify-between">
                 <span>الجُمل</span>
@@ -420,6 +416,25 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
               </li>
             </ul>
 
+            <div className="mt-3 border-t border-white/[0.06] pt-3">
+              <div className="mb-1.5 flex items-center justify-between text-[11px]">
+                <span className="font-bold text-slate-500">جاهزية النشر</span>
+                <span className="font-en font-bold text-slate-300">{readinessPercent}%</span>
+              </div>
+              <span className="block h-1.5 w-full overflow-hidden rounded-full bg-white/8">
+                <span
+                className="block h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${readinessPercent}%`,
+                  backgroundImage:
+                  readinessPercent === 100 ?
+                  "linear-gradient(90deg,#10b981,#22d3ee)" :
+                  "linear-gradient(90deg,#0891b2,#a855f7)"
+                }} />
+
+              </span>
+            </div>
+
             <p className="mt-3 border-t border-white/[0.06] pt-3 text-[11px] leading-relaxed text-slate-500">
               الحفظ تلقائي، و<span className="font-en">Ctrl+S</span> يحفظ فوراً. القصة لا
               تظهر للمستخدمين حتى تضغط «نشر التغييرات» وتكون حالتها «منشورة».
@@ -428,7 +443,6 @@ export function StoryStudio({ story, initialDraft, categories, versions }: Story
         </aside>
       </div>
     </div>);
-
 }
 
 export default StoryStudio;

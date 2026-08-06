@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import {
   ChevronDownIcon,
   ChevronUpIcon,
+  GripVerticalIcon,
   PlusIcon,
   SparklesIcon,
   Trash2Icon,
@@ -16,15 +17,8 @@ import type { StoryDraft } from "@/lib/admin/draft";
 import type { AdminSentence } from "@/types/admin";
 
 /**
- * محرّر جُمل القصة.
- *
- * الجملة هي وحدة التعلّم في WordFlow (كل جملة = سطر صوتي + ترجمة + مفردات)،
- * لذلك التحرير هنا **صف لكل جملة** لا نص واحد ضخم: الترتيب والحذف والإضافة في
- * المنتصف يجب أن تكون عمليات صريحة، لأن ترتيب الجُمل هو نفسه `line_index`
- * المستخدم في حفظ تقدّم المستخدمين وفي مسارات ملفات الصوت.
- *
- * تحذير معروض للأدمن: تغيير الترتيب يعني تغيير مسار ملف الصوت
- * (`line_N.mp3`) — لا نخفي هذا عنه.
+ * محرّر جُمل القصة — كل جملة هي وحدة تعلّم (نص + ترجمة + مفردات).
+ * الترتيب = line_index = مسار ملف الصوت، لذا الإضافة/الحذف/التحريك عمليات صريحة.
  */
 
 export interface SentencesTabProps {
@@ -47,7 +41,6 @@ function newSentence(index: number, level: string): AdminSentence {
 
 export function SentencesTab({ draft, patch }: SentencesTabProps) {
   const [expanded, setExpanded] = useState<string | null>(draft.sentences[0]?.id ?? null);
-  const [vocabInput, setVocabInput] = useState("");
 
   const wordCount = useMemo(
     () =>
@@ -59,14 +52,14 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
   );
 
   const setSentences = (sentences: AdminSentence[]) =>
-  patch({ sentences: sentences.map((sentence, index) => ({ ...sentence, lineIndex: index })) });
+    patch({ sentences: sentences.map((sentence, index) => ({ ...sentence, lineIndex: index })) });
 
   const updateSentence = (id: string, changes: Partial<AdminSentence>) =>
-  setSentences(
-    draft.sentences.map((sentence) =>
-    sentence.id === id ? { ...sentence, ...changes } : sentence
-    )
-  );
+    setSentences(
+      draft.sentences.map((sentence) =>
+      sentence.id === id ? { ...sentence, ...changes } : sentence
+      )
+    );
 
   const move = (index: number, direction: -1 | 1) => {
     const target = index + direction;
@@ -104,19 +97,23 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
           } /> :
 
 
-        <ul className="flex flex-col gap-2.5">
+        <ul className="flex flex-col gap-2">
             {draft.sentences.map((sentence, index) => {
             const open = expanded === sentence.id;
             return (
               <li
                 key={sentence.id}
-                className={`rounded-xl border transition-colors ${
+                className={`rounded-xl border transition-all ${
                 open ?
-                "border-cyan-400/30 bg-[#0B111C]" :
-                "border-white/[0.06] bg-[#0B111C]/60"}`
+                "border-cyan-400/30 bg-[#0B111C] shadow-[0_0_0_1px_rgba(34,211,238,0.1)]" :
+                "border-white/[0.06] bg-[#0B111C]/60 hover:border-white/[0.12]"}`
                 }>
 
-                  <div className="flex items-center gap-2.5 px-3 py-2.5">
+                  <div className="flex items-center gap-2 px-3 py-2.5">
+                    <span className="flex flex-col items-center gap-0.5 text-slate-600">
+                      <GripVerticalIcon className="h-3.5 w-3.5" aria-hidden />
+                    </span>
+
                     <span className="font-en flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/[0.08] text-[11.5px] font-black text-slate-400">
                       {String(index + 1).padStart(2, "0")}
                     </span>
@@ -137,13 +134,19 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
                       </span>
                     </button>
 
-                    <div className="flex shrink-0 items-center gap-1">
+                    {sentence.vocabulary.length > 0 &&
+                    <span className="hidden shrink-0 items-center gap-1 rounded-md border border-violet-500/25 bg-violet-500/10 px-2 py-0.5 text-[10.5px] font-bold text-violet-300 sm:flex">
+                        <span className="font-en">{sentence.vocabulary.length}</span> كلمة
+                      </span>
+                    }
+
+                    <div className="flex shrink-0 items-center gap-0.5">
                       <button
                       type="button"
                       aria-label="تحريك لأعلى"
                       disabled={index === 0}
                       onClick={() => move(index, -1)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:text-white disabled:opacity-30">
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-white disabled:opacity-25 disabled:hover:bg-transparent">
 
                         <ChevronUpIcon className="h-4 w-4" />
                       </button>
@@ -152,17 +155,18 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
                       aria-label="تحريك لأسفل"
                       disabled={index === draft.sentences.length - 1}
                       onClick={() => move(index, 1)}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:text-white disabled:opacity-30">
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-white disabled:opacity-25 disabled:hover:bg-transparent">
 
                         <ChevronDownIcon className="h-4 w-4" />
                       </button>
                       <button
                       type="button"
                       aria-label="حذف الجملة"
-                      onClick={() =>
-                      setSentences(draft.sentences.filter((item) => item.id !== sentence.id))
-                      }
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-rose-400/70 transition-colors hover:bg-rose-500/10 hover:text-rose-300">
+                      onClick={() => {
+                        setSentences(draft.sentences.filter((item) => item.id !== sentence.id));
+                        if (open) setExpanded(null);
+                      }}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300">
 
                         <Trash2Icon className="h-3.5 w-3.5" />
                       </button>
@@ -208,52 +212,11 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
                           </Select>
                         </Field>
 
-                        <Field label="المفردات المهمة" hint="اضغط Enter لإضافة كلمة">
-                          <div className="flex flex-col gap-2">
-                            <TextInput
-                          dir="ltr"
-                          value={expanded === sentence.id ? vocabInput : ""}
-                          onChange={(event) => setVocabInput(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter") return;
-                            event.preventDefault();
-                            const word = vocabInput.trim();
-                            if (!word || sentence.vocabulary.includes(word)) return;
-                            updateSentence(sentence.id, {
-                              vocabulary: [...sentence.vocabulary, word].slice(0, 24)
-                            });
-                            setVocabInput("");
-                          }}
-                          placeholder="passenger" />
-
-
-                            {sentence.vocabulary.length > 0 &&
-                        <div className="flex flex-wrap gap-1.5">
-                                {sentence.vocabulary.map((word) =>
-                          <span
-                            key={word}
-                            className="font-en flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[11px] font-bold text-violet-200">
-
-                                    {word}
-                                    <button
-                              type="button"
-                              aria-label={`حذف ${word}`}
-                              onClick={() =>
-                              updateSentence(sentence.id, {
-                                vocabulary: sentence.vocabulary.filter(
-                                  (item) => item !== word
-                                )
-                              })
-                              }
-                              className="text-violet-300/70 hover:text-white">
-
-                                      <XIcon className="h-3 w-3" />
-                                    </button>
-                                  </span>
-                          )}
-                              </div>
-                        }
-                          </div>
+                        <Field label="المفردات المهمة" hint="اكتب كلمة واضغط Enter">
+                          <VocabInput
+                          words={sentence.vocabulary}
+                          onChange={(vocabulary) => updateSentence(sentence.id, { vocabulary })}
+                          />
                         </Field>
                       </div>
 
@@ -301,6 +264,57 @@ export function SentencesTab({ draft, patch }: SentencesTabProps) {
 
 }
 
+/** إدخال المفردات لكل جملة على حدة — لا حالة مشتركة بين الجمل. */
+function VocabInput({
+  words,
+  onChange
+}: {words: string[];onChange: (words: string[]) => void;}) {
+  const [input, setInput] = useState("");
+
+  function add() {
+    const word = input.trim();
+    if (!word || words.includes(word)) return;
+    onChange([...words, word].slice(0, 24));
+    setInput("");
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <TextInput
+        dir="ltr"
+        value={input}
+        onChange={(event) => setInput(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          add();
+        }}
+        placeholder="passenger" />
+
+
+      {words.length > 0 &&
+      <div className="flex flex-wrap gap-1.5">
+          {words.map((word) =>
+        <span
+          key={word}
+          className="font-en flex items-center gap-1 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[11px] font-bold text-violet-200">
+
+              {word}
+              <button
+            type="button"
+            aria-label={`حذف ${word}`}
+            onClick={() => onChange(words.filter((item) => item !== word))}
+            className="text-violet-300/70 transition-colors hover:text-white">
+
+                <XIcon className="h-3 w-3" />
+              </button>
+            </span>
+        )}
+        </div>
+      }
+    </div>);
+}
+
 function QuickImport({ onImport }: {onImport: (lines: string[]) => void;}) {
   const [value, setValue] = useState("");
   const lines = value.
@@ -339,7 +353,6 @@ function QuickImport({ onImport }: {onImport: (lines: string[]) => void;}) {
         </Button>
       </div>
     </div>);
-
 }
 
 export default SentencesTab;
