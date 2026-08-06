@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+
+import React from "react";
 import { Search, Bell, ChevronDown } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { useProfileSummary } from "@/hooks/useProfileSummary";
 
 export interface AppShellHeaderProps {
   streak?: number;
@@ -10,122 +11,142 @@ export interface AppShellHeaderProps {
   level?: string;
   avatarUrl?: string;
   notificationCount?: number;
+
+  /**
+   * البحث ظاهر افتراضياً. الداشبورد تمرّر `false`: الحقل هناك لم يكن يفلتر
+   * أي شيء على الصفحة — مجرد صندوق يأخذ مساحة ويوحي بوظيفة غير موجودة.
+   * الشاشات التي يفلتر فيها البحث فعلاً (/vocabulary) تُبقيه.
+   */
+  showSearch?: boolean;
   searchPlaceholder?: string;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
 }
 
+/**
+ * · `useProfileSummary()` يُفعَّل فقط إن لم يمرّر الأب الاسم والمستوى، فالصفحات
+ *   المهاجَرة لا تدفع أي طلب إضافي.
+ * · مربع البحث يعمل بحالة داخلية عند غياب معالج خارجي (كان مقروءاً فقط).
+ * · مستمع ⌘/Ctrl + K صار مشروطاً بوجود البحث فعلاً — كان يُسجَّل دائماً
+ *   ويلتقط الاختصار حتى في شاشات بلا حقل بحث.
+ */
 export function AppShellHeader(props: AppShellHeaderProps) {
-  const [profile, setProfile] = useState<{
-    nickname?: string;
-    full_name?: string;
-    english_level?: string;
-    avatar_url?: string;
-  } | null>(null);
+  const needsFetch = !props.username || !props.level;
+  const { profile } = useProfileSummary({ enabled: needsFetch });
 
-  useEffect(() => {
-    // جلب بيانات المستخدم إذا لم تكن المكونات مرسلة كـ Props من الخارج
-    const fetchUserProfile = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  const showSearch = props.showSearch ?? true;
 
-      if (user) {
-        const { data } = await supabase
-          .from("profiles")
-          .select("nickname, full_name, english_level, avatar_url")
-          .eq("id", user.id)
-          .single();
+  const [localSearch, setLocalSearch] = React.useState("");
+  const isControlled = typeof props.onSearchChange === "function";
+  const searchValue = isControlled ? props.searchValue ?? "" : localSearch;
 
-        if (data) {
-          setProfile(data);
-        } else {
-          setProfile({
-            nickname: user.user_metadata?.full_name || user.email?.split("@")[0] || "مستخدم",
-            english_level: "B1",
-            avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || "",
-          });
-        }
-      }
-    };
-
-    if (!props.username) {
-      fetchUserProfile();
-    }
-  }, [props.username]);
-
-  // استخدام الـ Props إذا وجدت، وإلا استخدام البيانات المحملة من Supabase
-  const username = props.username || profile?.nickname || profile?.full_name || "مستخدم";
-  const level = props.level || profile?.english_level || "B1";
-  const avatarUrl = props.avatarUrl || profile?.avatar_url;
-  const streak = props.streak ?? 12;
-  const notificationCount = props.notificationCount ?? 3;
-  const searchPlaceholder = props.searchPlaceholder || "ابحث في القصص...";
+  const username = props.username || profile?.nickname || "مستخدم";
+  const level = props.level || profile?.level || "A1";
+  const avatarUrl = props.avatarUrl || profile?.avatarUrl || undefined;
+  const streak = props.streak ?? 0;
+  const notificationCount = props.notificationCount ?? 0;
+  const searchPlaceholder = props.searchPlaceholder || "ابحث...";
 
   const avatarChar = username[0]?.toUpperCase() ?? "U";
+  const searchRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (!showSearch) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showSearch]);
 
   return (
-    <header className="w-full bg-[#070a14]/90 backdrop-blur-md border-b border-white/[0.08] px-6 py-3 flex items-center justify-between gap-4 font-cairo z-20" dir="rtl">
+    <header
+      className={`z-20 flex w-full items-center gap-4 border-b border-white/[0.08] bg-[#070a14]/90 px-6 py-3 font-cairo backdrop-blur-md ${
+      showSearch ? "justify-between" : "justify-start"}`
+      }
+      dir="rtl">
       
-      {/* 1. الجزء الأيمن: بيانات المستخدم + الستريك + الإشعارات */}
+      {/* 1. بيانات المستخدم + الستريك + الإشعارات */}
       <div className="flex items-center gap-3.5">
-        {/* كارت بروفايل المستخدم */}
-        <div className="bg-[#0f172a]/60 border border-white/[0.08] rounded-[10px] px-3.5 py-1.5 flex items-center gap-3 cursor-pointer hover:border-white/20 transition">
-          {avatarUrl ? (
-            <img
-              src={avatarUrl}
-              alt={username}
-              className="w-[30px] h-[30px] rounded-full border border-white/20 object-cover"
-            />
-          ) : (
-            <div className="w-[30px] h-[30px] rounded-full border border-white/20 flex items-center justify-center font-extrabold text-[0.85rem] bg-white/[0.03] text-white font-en">
+        <a
+          href="/profile"
+          className="flex items-center gap-3 rounded-[10px] border border-white/[0.08] bg-[#0f172a]/60 px-3.5 py-1.5 transition hover:border-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60">
+          
+          {avatarUrl ?
+          <img
+            src={avatarUrl}
+            alt=""
+            aria-hidden
+            className="h-[30px] w-[30px] rounded-full border border-white/20 object-cover" /> :
+
+
+          <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-white/20 bg-white/[0.03] font-en text-[0.85rem] font-extrabold text-white">
               {avatarChar}
             </div>
-          )}
-          
-          <div className="w-px h-5 bg-white/10" />
-          <div className="flex flex-col items-start leading-tight">
-            <span className="font-en text-white text-[0.85rem] font-bold">{username}</span>
-            <span className="text-[#94a3b8] text-[0.7rem]">مستوى {level}</span>
-          </div>
-          <ChevronDown size={12} className="text-[#94a3b8]" />
-        </div>
+          }
 
-        {/* الستريك */}
-        <div className="bg-[#0f172a]/60 border border-white/[0.08] rounded-[10px] px-3.5 py-1.5 flex items-center gap-2 text-white text-[0.85rem] font-bold">
-          <span>🔥</span>
+          <div aria-hidden className="h-5 w-px bg-white/10" />
+          <div className="flex flex-col items-start leading-tight">
+            <span className="font-en text-[0.85rem] font-bold text-white">{username}</span>
+            <span className="text-[0.7rem] text-[#94a3b8]">مستوى {level}</span>
+          </div>
+          <ChevronDown size={12} className="text-[#94a3b8]" aria-hidden />
+        </a>
+
+        <div
+          className="flex items-center gap-2 rounded-[10px] border border-white/[0.08] bg-[#0f172a]/60 px-3.5 py-1.5 text-[0.85rem] font-bold text-white"
+          title={streak > 0 ? `${streak} يوم متتالي` : "ابدأ سلسلتك اليوم"}>
+          
+          <span aria-hidden>🔥</span>
           <span>{streak} يوم متتالي</span>
         </div>
 
-        {/* الإشعارات */}
-        <button className="relative text-[#94a3b8] hover:text-white transition flex items-center p-1.5 rounded-lg hover:bg-white/[0.05]" aria-label="الإشعارات">
-          <Bell size={18} />
-          {notificationCount > 0 && (
-            <span className="absolute top-0 right-0 bg-[#f43f5e] text-[#ffffff] text-[0.65rem] font-extrabold w-4 h-4 rounded-full flex items-center justify-center border-2 border-[#070a14]">
+        <button
+          type="button"
+          className="relative flex items-center rounded-lg p-1.5 text-[#94a3b8] transition hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
+          aria-label={
+          notificationCount > 0 ? `الإشعارات (${notificationCount} جديدة)` : "الإشعارات"
+          }>
+          
+          <Bell size={18} aria-hidden />
+          {notificationCount > 0 &&
+          <span className="absolute right-0 top-0 flex h-4 w-4 items-center justify-center rounded-full border-2 border-[#070a14] bg-[#f43f5e] text-[0.65rem] font-extrabold text-white">
               {notificationCount}
             </span>
-          )}
+          }
         </button>
       </div>
 
-      {/* 2. الجزء الأيسر: مربع البحث */}
-      <div className="bg-[#0f172a]/60 border border-white/[0.08] rounded-[10px] px-3.5 py-2 flex items-center gap-2.5 w-[340px]">
-        <Search size={16} className="text-[#94a3b8]" />
-        <input
-          type="text"
+      {/* 2. مربع البحث — فقط حيث يفلتر شيئاً فعلاً */}
+      {showSearch &&
+      <div className="flex w-[340px] items-center gap-2.5 rounded-[10px] border border-white/[0.08] bg-[#0f172a]/60 px-3.5 py-2 focus-within:border-white/20">
+          <Search size={16} className="text-[#94a3b8]" aria-hidden />
+          <input
+          ref={searchRef}
+          type="search"
+          aria-label={searchPlaceholder}
           placeholder={searchPlaceholder}
-          value={props.searchValue}
-          onChange={props.onSearchChange ? (e) => props.onSearchChange!(e.target.value) : undefined}
-          className="bg-transparent border-none outline-none text-white text-[0.85rem] w-full placeholder:text-[#64748b]"
-        />
-        <span className="bg-white/[0.04] border border-white/10 text-[#64748b] text-[0.7rem] px-1.5 py-0.5 rounded-[6px] font-en whitespace-nowrap">
-          Ctrl K
-        </span>
-      </div>
+          value={searchValue}
+          onChange={(event) => {
+            const next = event.target.value;
+            if (isControlled) props.onSearchChange?.(next);else
+            setLocalSearch(next);
+          }}
+          className="w-full border-none bg-transparent text-[0.85rem] text-white outline-none placeholder:text-[#64748b]" />
+        
+          <span
+          aria-hidden
+          className="whitespace-nowrap rounded-[6px] border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-en text-[0.7rem] text-[#64748b]">
+          
+            Ctrl K
+          </span>
+        </div>
+      }
+    </header>);
 
-    </header>
-  );
 }
 
 export default AppShellHeader;

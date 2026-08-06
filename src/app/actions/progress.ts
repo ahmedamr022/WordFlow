@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   HttpError,
@@ -24,6 +23,15 @@ function fail(err: unknown): ActionResult<never> {
   return { ok: false, error: "تعذر حفظ تقدمك، حاول مرة أخرى" };
 }
 
+/**
+ * لا نمرّر نص خطأ Postgres للمتصفح: أسماء الأعمدة والقيود تكشف المخطط.
+ * نسجّله على السيرفر ونرمي رسالة عربية آمنة.
+ */
+function dbFailure(scope: string, error: {message: string;code?: string;}): HttpError {
+  console.error(`[progress:${scope}]`, error.code ?? "", error.message);
+  return new HttpError(400, "تعذر حفظ تقدمك، حاول مرة أخرى");
+}
+
 export async function startStoryAction(input: unknown): Promise<ActionResult> {
   try {
     await assertSameOrigin();
@@ -42,7 +50,7 @@ export async function startStoryAction(input: unknown): Promise<ActionResult> {
       },
       { onConflict: "user_id,story_id", ignoreDuplicates: true }
     );
-    if (error) throw new HttpError(400, error.message);
+    if (error) throw dbFailure("startStory", error);
     return { ok: true };
   } catch (err) {
     return fail(err);
@@ -80,7 +88,7 @@ input: unknown)
       p_incorrect: parsed.data.incorrectChars,
       p_seconds: parsed.data.seconds
     });
-    if (error) throw new HttpError(400, error.message);
+    if (error) throw dbFailure("lineAttempt", error);
 
     return { ok: true, data: data as LineAttemptResult };
   } catch (err) {
@@ -103,7 +111,7 @@ input: unknown)
       p_user_id: user.id,
       p_story_id: parsed.data.storyId
     });
-    if (error) throw new HttpError(400, error.message);
+    if (error) throw dbFailure("completeStory", error);
 
     revalidatePath("/dashboard");
     revalidatePath("/stats");
@@ -120,7 +128,7 @@ export async function claimDailyStreakAction(): Promise<ActionResult<{xp_total: 
     const user = await requireUser();
     const admin = createAdminClient();
     const { data, error } = await admin.rpc("claim_daily_streak", { p_user_id: user.id });
-    if (error) throw new HttpError(400, error.message);
+    if (error) throw dbFailure("claimStreak", error);
     revalidatePath("/dashboard");
     return { ok: true, data: { xp_total: Number(data ?? 0) } };
   } catch (err) {
@@ -128,14 +136,11 @@ export async function claimDailyStreakAction(): Promise<ActionResult<{xp_total: 
   }
 }
 
-/** قراءة مجمّعة للداشبورد: صف واحد بدل خمس استعلامات تجميع. */
-export async function getUserStats() {
-  const user = await requireUser();
-  const supabase = await createClient();
-  const { data } = await supabase.
-  from("user_stats").
-  select("*").
-  eq("user_id", user.id).
-  single();
-  return data;
-}
+/**
+ * أُزيلت `getUserStats()` من هذا الملف.
+ *
+ * كانت: بلا try/catch (فـ requireUser() ترمي على الزائر → استثناء Server Action
+ * غير معالَج = 500 بدل رد لطيف)، وتستخدم select("*")، ولا يستدعيها أي ملف
+ * في المشروع. النسخة الحيّة والمستخدمة فعلاً هي getUserStatsAction في
+ * src/app/actions/stats.ts — استوردها من هناك.
+ */

@@ -1,12 +1,13 @@
-;
+"use client";
 
-import { useState, useTransition } from "react";
+import React, { useState, useTransition } from "react";
 import Link from "next/link";
+
 import { requestPasswordResetAction } from "@/app/actions/auth";
 
 /**
- * الصفحة كانت مفقودة رغم وجود لينك لها في شاشة الدخول.
- * الرسالة موحّدة دائماً بغض النظر عن وجود الإيميل — منع تعداد الحسابات.
+ * The response is identical whether or not the address exists — no account
+ * enumeration.
  */
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -22,41 +23,49 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <main dir="rtl" className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6">
-      <h1 className="text-2xl font-bold text-slate-900">استعادة كلمة المرور</h1>
+    <main
+      dir="rtl"
+      className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center bg-background px-6">
+      
+      <h1 className="text-2xl font-bold text-foreground">استعادة كلمة المرور</h1>
 
       {sent ?
       <div
         role="status"
-        className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+        aria-live="polite"
+        className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300">
         
-          لو كان هذا البريد مسجّلاً عندنا، هتلاقي رسالة فيها رابط إعادة تعيين كلمة المرور خلال دقائق.
-          راجع مجلد الرسائل غير المرغوب فيها لو ما وصلتش.
+          لو كان هذا البريد مسجّلاً عندنا، هتلاقي رسالة فيها رابط إعادة تعيين كلمة المرور خلال
+          دقائق. راجع مجلد الرسائل غير المرغوب فيها لو ما وصلتش.
         </div> :
 
       <>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-sm text-muted-foreground">
             اكتب بريدك الإلكتروني وهنبعتلك رابطاً لتعيين كلمة مرور جديدة.
           </p>
-          <form onSubmit={onSubmit} className="mt-6 space-y-4">
+
+          <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-800">
+              <label htmlFor="email" className="block text-sm font-medium text-foreground">
                 البريد الإلكتروني
               </label>
               <input
               id="email"
+              name="email"
               type="email"
+              autoComplete="email"
               required
               dir="ltr"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-left outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-900/10" />
+              className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-left text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
             
             </div>
+
             <button
             type="submit"
             disabled={pending}
-            className="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60">
+            className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60">
             
               {pending ? "جارٍ الإرسال..." : "إرسال الرابط"}
             </button>
@@ -64,7 +73,10 @@ export default function ForgotPasswordPage() {
         </>
       }
 
-      <Link href="/login" className="mt-6 text-sm text-slate-600 underline underline-offset-4">
+      <Link
+        href="/login"
+        className="mt-6 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground">
+        
         الرجوع لتسجيل الدخول
       </Link>
     </main>);

@@ -11,17 +11,26 @@ interface SparklineProps {
 export function Sparkline({ type, data, color }: SparklineProps) {
   const w = 96;
   const h = 40;
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
+
+  // حماية من البيانات الفارغة
+  if (!data.length) {
+    return <svg width={w} height={h} />;
+  }
+
+  const max = Math.max(...data, 0);
+  const min = Math.min(...data, 0);
+  const range = Math.max(max - min, 1);
 
   if (type === "bars") {
     const gap = 3;
     const bw = (w - gap * (data.length - 1)) / data.length;
+
     return (
       <svg width={w} height={h} className="overflow-visible">
         {data.map((d, i) => {
-          const bh = 6 + (d / max) * (h - 6);
+          const ratio = max === 0 ? 0 : d / max;
+          const bh = 6 + ratio * (h - 6);
+
           return (
             <rect
               key={i}
@@ -41,9 +50,13 @@ export function Sparkline({ type, data, color }: SparklineProps) {
 
   const points = data
     .map((d, i) => {
-      const x = (i / (data.length - 1)) * w;
-      const y = h - ((d - min) / range) * (h - 6) - 3;
-      return `${x},${y}`;
+      const x =
+        data.length === 1 ? w / 2 : (i / (data.length - 1)) * w;
+
+      const y =
+        h - ((d - min) / range) * (h - 6) - 3;
+
+      return `${x},${Number.isFinite(y) ? y : h / 2}`;
     })
     .join(" ");
 

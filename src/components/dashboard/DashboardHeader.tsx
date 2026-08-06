@@ -1,56 +1,41 @@
-"use client";
-
-import React, { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import React from "react";
 import { AppShellHeader } from "@/components/layout/app-shell-header";
 
-export function DashboardHeader() {
-  const [profile, setProfile] = useState<{
-    nickname?: string;
-    full_name?: string;
-    english_level?: string;
-    avatar_url?: string;
-  } | null>(null);
+/**
+ * غلاف رفيع فوق `AppShellHeader`.
+ *
+ * الداشبورد تقرأ الاسم والمستوى والستريك على السيرفر مرة واحدة، فتمرَّر هنا
+ * كـ props ولا ينفّذ الهيدر أي طلب إضافي (كان يستدعي useProfileSummary مرة
+ * ثانية لنفس البيانات).
+ *
+ * `showSearch={false}`: صندوق البحث في شريط الداشبورد لم يكن مربوطاً بأي
+ * فلترة على الصفحة — أُزيل بدل الإيحاء بوظيفة غير موجودة.
+ */
+export interface DashboardHeaderProps {
+  nickname: string;
+  level: string;
+  avatarUrl?: string | null;
+  streak: number;
+  notificationCount?: number;
+}
 
-  useEffect(() => {
-    const fetchUserProfile = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (user) {
-        const { data } = await supabase
-          .from("profiles")
-          .select("nickname, full_name, english_level, avatar_url")
-          .eq("id", user.id)
-          .single();
-
-        if (data) {
-          setProfile(data);
-        } else {
-          setProfile({
-            nickname: user.user_metadata?.full_name || user.email?.split("@")[0] || "warm_dusk1679",
-            english_level: "B1",
-            avatar_url: user.user_metadata?.avatar_url || user.user_metadata?.picture || "",
-          });
-        }
-      }
-    };
-
-    fetchUserProfile();
-  }, []);
-
-  const username = profile?.nickname || profile?.full_name || "warm_dusk1679";
-  const level = profile?.english_level || "B1";
-
+export function DashboardHeader({
+  nickname,
+  level,
+  avatarUrl,
+  streak,
+  notificationCount
+}: DashboardHeaderProps) {
   return (
     <AppShellHeader
-      username={username}
+      username={nickname}
       level={level}
-      avatarUrl={profile?.avatar_url}
-    />
-  );
+      avatarUrl={avatarUrl ?? undefined}
+      streak={streak}
+      notificationCount={notificationCount}
+      showSearch={false} />);
+
+
 }
 
 export default DashboardHeader;

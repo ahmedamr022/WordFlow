@@ -1,4 +1,5 @@
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
+
 import {
   requireUser,
   enforceRateLimit,
@@ -7,15 +8,11 @@ import {
   HttpError } from
 "@/lib/auth/guards";
 import { ttsRequestSchema } from "@/lib/validation/schemas";
-import { serverEnv } from "@/lib/env";
+import { speechEnv } from "@/lib/env/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-/**
- * إصلاحات مقابل النسخة الحالية:
- *  · الراوت كان مفتوحاً لأي زائر مجهول ⇒ requireUser() الآن إلزامي
- *  · لا rate limiting ⇒ 200 طلب/ساعة لكل مستخدم
- *  · نص المستخدم كان يُحقن مباشرة في URL طرف ثالث ⇒ تحقق بـ zod + قائمة أصوات مسموحة
- */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const ALLOWED_VOICES = new Set([
 "af_heart",
@@ -24,6 +21,13 @@ const ALLOWED_VOICES = new Set([
 "bf_emma",
 "bm_george"]
 );
+
+const UPSTREAM_TIMEOUT_MS = 30_000;
+
+/** Preserves any base path configured in KOKORO_API_URL. */
+function speechEndpoint(base: string): string {
+  return `${base.replace(/\/+$/, "")}/v1/audio/speech`;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,14 +39,15 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       throw new HttpError(400, parsed.error.issues[0]?.message ?? "طلب غير صالح");
     }
+
     if (!ALLOWED_VOICES.has(parsed.data.voiceId)) {
       throw new HttpError(400, "الصوت المطلوب غير مسموح");
     }
 
-    const env = serverEnv();
+    const env = speechEnv();
     if (!env.KOKORO_API_URL) throw new HttpError(503, "خدمة الصوت غير مهيأة");
 
-    const upstream = await fetch(new URL("/v1/audio/speech", env.KOKORO_API_URL), {
+    const upstream = await fetch(speechEndpoint(env.KOKORO_API_URL), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -50,16 +55,21 @@ export async function POST(request: NextRequest) {
         voice: parsed.data.voiceId,
         response_format: "mp3"
       }),
-      cache: "no-store"
-    });
+      cache: "no-store",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+    }).catch(() => null);
 
-    if (!upstream.ok || !upstream.body) {
+    if (!upstream || !upstream.ok || !upstream.body) {
       throw new HttpError(502, "تعذر توليد الصوت");
     }
 
     void createAdminClient().
     from("ai_usage_log").
-    insert({ user_id: user.id, route: "/api/tts", prompt_tokens: parsed.data.text.length }).
+    insert({
+      user_id: user.id,
+      route: "/api/tts",
+      prompt_tokens: parsed.data.text.length
+    }).
     then(() => undefined);
 
     return new Response(upstream.body, {

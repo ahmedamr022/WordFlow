@@ -1,8 +1,11 @@
 import { z } from "zod";
 
 /**
- * القاعدة: كل Server Action تبدأ بـ schema.parse().
- * التحقق في المتصفح للتجربة فقط ولا يُوثق به أبداً.
+ * Rule: every Server Action begins with schema.safeParse().
+ * Client-side validation is UX only and is never trusted.
+ *
+ * Modernised for Zod v4: z.email() / z.url() / z.uuid() replace the
+ * deprecated z.string().email() chain form.
  */
 
 const CEFR = z.enum(["A1", "A2", "B1", "B2", "C1", "C2"]);
@@ -11,8 +14,8 @@ export const emailSchema = z.
 string().
 trim().
 toLowerCase().
-email("بريد إلكتروني غير صالح").
-max(254);
+max(254).
+pipe(z.email("بريد إلكتروني غير صالح"));
 
 export const passwordSchema = z.
 string().
@@ -27,7 +30,8 @@ trim().
 min(2, "الاسم حرفان على الأقل").
 max(50, "الاسم 50 حرفاً كحد أقصى");
 
-// ── الحساب ─────────────────────────────────────────────────────────────────
+// ── Account ────────────────────────────────────────────────────────────────
+
 export const signUpSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
@@ -48,13 +52,29 @@ refine((v) => v.password === v.confirm, {
   path: ["confirm"]
 });
 
+/** Partial edit from /profile and /settings. */
 export const profileSchema = z.object({
   nickname: nicknameSchema.optional(),
   country: z.string().trim().max(60).optional(),
   native_language: z.string().trim().max(30).optional(),
   english_level: CEFR.optional(),
-  avatar_url: z.string().url().max(500).optional(),
+  avatar_url: z.url().max(500).optional(),
   timezone: z.string().trim().max(60).optional()
+});
+
+/**
+ * Finishing onboarding REQUIRES the full answer set.
+ *
+ * Before: completeOnboardingAction used profileSchema (all optional), so an
+ * empty payload still stamped onboarding_completed_at. The user then landed
+ * on a dashboard with a null english_level, which every stats read papered
+ * over with a fake "A1".
+ */
+export const completeOnboardingSchema = z.object({
+  nickname: nicknameSchema,
+  native_language: z.string().trim().min(2).max(30),
+  country: z.string().trim().min(2).max(60),
+  english_level: CEFR
 });
 
 export const preferencesSchema = z.object({
@@ -67,14 +87,17 @@ export const preferencesSchema = z.object({
 });
 
 export const placementTestSchema = z.object({
-  answers: z.array(z.object({ questionId: z.string(), answer: z.string().max(500) })).max(100),
+  answers: z.
+  array(z.object({ questionId: z.string().max(80), answer: z.string().max(500) })).
+  max(100),
   score: z.number().int().min(0).max(1000),
   resulting_level: CEFR
 });
 
-// ── التقدم ─────────────────────────────────────────────────────────────────
+// ── Progress ───────────────────────────────────────────────────────────────
+
 export const lineAttemptSchema = z.object({
-  lineId: z.string().uuid(),
+  lineId: z.uuid(),
   wpm: z.number().min(0).max(1000),
   accuracy: z.number().min(0).max(100),
   correctChars: z.number().int().min(0).max(5000),
@@ -82,22 +105,25 @@ export const lineAttemptSchema = z.object({
   seconds: z.number().min(0.1).max(3600)
 });
 
-export const storyIdSchema = z.object({ storyId: z.string().uuid() });
+export const storyIdSchema = z.object({ storyId: z.uuid() });
 
 export const wordReviewSchema = z.object({
-  wordId: z.string().uuid(),
+  wordId: z.uuid(),
   correct: z.boolean()
 });
 
-export const vocabTestSchema = z.object({
-  categoryId: z.string().uuid(),
-  results: z.
-  array(z.object({ wordId: z.string().uuid(), correct: z.boolean() })).
-  min(1).
-  max(200)
+export const wordByTextSchema = z.object({
+  word: z.string().trim().min(1).max(80),
+  partOfSpeech: z.string().trim().max(30).optional()
 });
 
-// ── هجرة localStorage ──────────────────────────────────────────────────────
+export const vocabTestSchema = z.object({
+  categoryId: z.uuid(),
+  results: z.array(z.object({ wordId: z.uuid(), correct: z.boolean() })).min(1).max(200)
+});
+
+// ── localStorage migration ─────────────────────────────────────────────────
+
 export const importLocalProgressSchema = z.object({
   xpTotal: z.number().int().min(0).max(1_000_000),
   streakCount: z.number().int().min(0).max(3650),
@@ -106,12 +132,11 @@ export const importLocalProgressSchema = z.object({
   learnedWords: z.array(z.string().max(80)).max(5000).default([])
 });
 
-// ── مدخلات راوتات الـ API ──────────────────────────────────────────────────
+// ── API route inputs ───────────────────────────────────────────────────────
+
 export const ttsRequestSchema = z.object({
   text: z.string().trim().min(1).max(600, "النص أطول من الحد المسموح"),
-  voiceId: z.
-  string().
-  regex(/^[a-zA-Z0-9_-]{2,40}$/, "معرّف صوت غير مسموح")
+  voiceId: z.string().regex(/^[a-zA-Z0-9_-]{2,40}$/, "معرّف صوت غير مسموح")
 });
 
 export const explainRequestSchema = z.object({
@@ -120,5 +145,7 @@ export const explainRequestSchema = z.object({
 });
 
 export type SignUpInput = z.infer<typeof signUpSchema>;
+export type SignInInput = z.infer<typeof signInSchema>;
+export type CompleteOnboardingInput = z.infer<typeof completeOnboardingSchema>;
 export type LineAttemptInput = z.infer<typeof lineAttemptSchema>;
 export type ImportLocalProgressInput = z.infer<typeof importLocalProgressSchema>;

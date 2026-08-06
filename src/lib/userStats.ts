@@ -1,59 +1,36 @@
+
+import type { CefrLevel } from "@/types/database";
+
+/** شكل الإحصائيات الموحّد بين السيرفر والعميل. لا تخزين محلي هنا إطلاقاً. */
 export interface UserStats {
   xpTotal: number;
   streakCount: number;
+  longestStreak: number;
   wordsLearned: number;
   storiesCompleted: number;
-  level: string;
-  completedStoryIds: string[];
-  learnedWords: string[];
+  totalTimeSeconds: number;
+  averageAccuracy: number | null;
+  level: CefrLevel;
+  lastActiveDate: string | null;
 }
 
-const DEFAULT_STATS: UserStats = {
+export const DEFAULT_USER_STATS: UserStats = {
   xpTotal: 0,
-  streakCount: 1,
+  streakCount: 0,
+  longestStreak: 0,
   wordsLearned: 0,
   storiesCompleted: 0,
+  totalTimeSeconds: 0,
+  averageAccuracy: null,
   level: "A1",
-  completedStoryIds: [],
-  learnedWords: [],
+  lastActiveDate: null,
 };
 
-export class UserStatsService {
-  private static STORAGE_KEY = "wordflow_user_stats_v2";
-
-  public static getStats(): UserStats {
-    if (typeof window === "undefined") return DEFAULT_STATS;
-    try {
-      const data = localStorage.getItem(this.STORAGE_KEY);
-      if (data) {
-        return JSON.parse(data);
-      }
-    } catch {
-      // fallback
-    }
-    return DEFAULT_STATS;
-  }
-
-  public static recordStoryCompletion(storyId: string, wordCount: number, xpEarned: number = 50) {
-    const stats = this.getStats();
-    if (!stats.completedStoryIds.includes(storyId)) {
-      stats.completedStoryIds.push(storyId);
-      stats.storiesCompleted = stats.completedStoryIds.length;
-    }
-    stats.xpTotal += xpEarned;
-    stats.wordsLearned += wordCount;
-
-    if (typeof window !== "undefined") {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(stats));
-    }
-    return stats;
-  }
-
-  public static setLevel(level: string) {
-    const stats = this.getStats();
-    stats.level = level;
-    if (typeof window !== "undefined") {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(stats));
-    }
-  }
+/** نقطة واحدة في سلسلة النشاط اليومي (user_daily_activity). */
+export interface DailyActivityPoint {
+  date: string;
+  xpEarned: number;
+  linesTyped: number;
+  wordsReviewed: number;
+  storiesCompleted: number;
 }

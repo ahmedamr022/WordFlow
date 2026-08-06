@@ -1,17 +1,32 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+
 import { createClient } from "@/lib/supabase/server";
+import { siteOrigin } from "@/lib/env/public";
+import { safeInternalPath } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
 
 /**
- * النسخة القديمة كانت تعمل signOut لأي مستخدم OAuth بلا صف profiles —
- * أي أن كل مستخدم جديد بجوجل كان مسدوداً تماماً.
+ * OAuth / PKCE code exchange.
  *
- * الآن الـ trigger on_auth_user_created يضمن وجود الصف لحظة إنشاء الحساب،
- * فيبقى دور هذا الراوت مجرد تبادل الكود ثم التوجيه.
+ * Redirects are built from the CANONICAL origin (NEXT_PUBLIC_SITE_URL), not
+ * from request.nextUrl.origin, which is attacker-influenceable behind a proxy
+ * via the Host header.
+ *
+ * Destination is decided from profiles.onboarding_completed_at — the same
+ * flag ProtectedShell uses — so the callback can never disagree with the
+ * shells and cause a bounce.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = request.nextUrl;
-  const code = searchParams.get("code");
+  const origin = siteOrigin();
+  const { searchParams } = request.nextUrl;
 
+  const oauthError = searchParams.get("error_description") ?? searchParams.get("error");
+  if (oauthError) {
+    return NextResponse.redirect(`${origin}/login?error=oauth_failed`);
+  }
+
+  const code = searchParams.get("code");
   if (!code) {
     return NextResponse.redirect(`${origin}/login?error=missing_code`);
   }
@@ -29,6 +44,10 @@ export async function GET(request: NextRequest) {
   eq("id", data.user.id).
   maybeSingle();
 
-  const destination = profile?.onboarding_completed_at ? "/dashboard" : "/onboarding";
-  return NextResponse.redirect(`${origin}${destination}`);
+  if (!profile?.onboarding_completed_at) {
+    return NextResponse.redirect(`${origin}/onboarding`);
+  }
+
+  const next = safeInternalPath(searchParams.get("next"), "/dashboard");
+  return NextResponse.redirect(`${origin}${next}`);
 }

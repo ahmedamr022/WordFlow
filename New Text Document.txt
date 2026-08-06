@@ -1,0 +1,6053 @@
+I traced the whole auth path through the linked WordFlow repo. Below is the audit with complete replacement files.
+
+Note upfront: this Magic Patterns workspace is a React SPA sandbox, so I can't run your Next build here — the repo is attached read-only. Everything below is written to be copy-pasted into your project.
+
+PART 1 — THE ONBOARDING REDIRECT BUG (root cause)
+
+What actually happens
+
+There are three independent causes stacked on top of each other. Fixing only one leaves the bug.
+
+Cause A — middleware.ts is silently dead in Next.js 16
+
+You are on next@16.2.6. In Next 16 the middleware file convention was renamed to proxy. A leftover middleware.ts is deprecated and its exported middleware function is no longer picked up as the request interceptor.
+
+Consequence: every guard you wrote in src/middleware.ts — guest→login, onboarding gating, auth-page bouncing — does not run at all. Routes you believe are protected (/stories, /vocabulary, /paths, /stats, /challenges, /profile, /settings) are reachable by anyone, and — critically — the Supabase session is never refreshed on navigation, because that refresh only lived in middleware. Expired access tokens are never rotated server-side, which is your "broken session" symptom.
+
+Cause B — the real redirect is client-side, in src/app/(auth)/login/page.tsx
+
+const { data: profile } = await supabase.from("profiles")
+
+  .select("nickname, country, native_language, english_level")…
+
+if (profile && profile.nickname && profile.country && profile.native_language && profile.english_level) {
+
+  router.push("/dashboard");
+
+} else {
+
+  router.push("/onboarding/nickname");   // ← this fires
+
+}
+
+profiles.english_level is nullable and nothing populates it except the onboarding level step or a placement test. country is also nullable. handle_new_user() only fills nickname and avatar_url.
+
+So for every account that predates the onboarding flow — and every OAuth account — this condition is false and the browser pushes /onboarding/nickname. That is your "Login → /onboarding/nickname" and (via /dashboard links on the landing page → /login → same code path) your "Start Now → /onboarding/nickname".
+
+Cause C — the gate uses a claim that is almost never true
+
+middleware.ts gated on user.app_metadata.onboarding_completed. That claim is written only by the sync_onboarding_claim trigger, which fires only on an UPDATE of profiles that transitions onboarding_completed_at from null → not-null. That transition is written only by completeOnboardingAction.
+
+Therefore:
+
+every pre-existing user → claim absent → forced into onboarding forever;
+
+/auth/callback redirects to /onboarding, but src/app/onboarding/page.tsx does not exist → 404;
+
+the whole app has two contradicting definitions of "onboarded" (4 nullable columns in the login page vs. a JWT claim in middleware).
+
+Cause D — httpOnly: true forced on Supabase cookies
+
+const SECURE_COOKIE = { httpOnly: true, … };
+
+response.cookies.set(name, value, { ...options, ...SECURE_COOKIE });
+
+@supabase/ssr's browser client reads the session from document.cookie. Forcing httpOnly makes the auth cookie invisible to JS, so createClient() in any Client Component returns a session-less client: supabase.auth.getUser() → null, every client-side query fails RLS, and you get hydration flicker between server-rendered "logged in" and client-rendered "logged out". Spreading ...SECURE_COOKIE after ...options also clobbers Supabase's own maxAge/expires.
+
+The proper solution
+
+One source of truth: profiles.onboarding_completed_at. Nothing else.
+
+Read it once per request in a cache()-wrapped server helper, not in middleware, not in the browser.
+
+Authorization lives in the route/data layer (ProtectedShell, OnboardingShell, server actions) — proxy.ts only refreshes cookies and does optimistic UX redirects. This is also the official Next 16 guidance (proxy is not an auth boundary; cf. CVE-2025-29927).
+
+Migrate middleware.ts → proxy.ts, stop mangling Supabase cookies.
+
+Backfill onboarding_completed_at for existing users so they aren't dragged back through onboarding.
+
+PART 2 — REPLACEMENT FILES
+
+2.1 package.json
+
+Root cause: autoprefixer is dead weight under @tailwindcss/postcss (v4 handles prefixing internally) and can conflict; server-only is required to make the server/client boundary a compile error instead of a runtime one; there was no typecheck script so tsc drift went unnoticed.
+
+{
+
+  "name": "wordflow",
+
+  "version": "0.1.0",
+
+  "private": true,
+
+  "scripts": {
+
+    "dev": "next dev",
+
+    "build": "next build",
+
+    "start": "next start",
+
+    "lint": "eslint .",
+
+    "typecheck": "tsc --noEmit"
+
+  },
+
+  "dependencies": {
+
+    "@supabase/ssr": "^0.12.4",
+
+    "@supabase/supabase-js": "^2.112.0",
+
+    "@vercel/analytics": "^1.6.1",
+
+    "class-variance-authority": "^0.7.1",
+
+    "clsx": "^2.1.1",
+
+    "framer-motion": "^12.43.0",
+
+    "lucide-react": "^1.28.0",
+
+    "next": "16.2.6",
+
+    "react": "^19",
+
+    "react-dom": "^19",
+
+    "server-only": "^0.0.1",
+
+    "tailwind-merge": "^3.3.1",
+
+    "tw-animate-css": "^1.4.0",
+
+    "zod": "^4.4.3"
+
+  },
+
+  "devDependencies": {
+
+    "@eslint/eslintrc": "^3.3.6",
+
+    "@tailwindcss/postcss": "^4.3.3",
+
+    "@types/node": "^24",
+
+    "@types/react": "^19",
+
+    "@types/react-dom": "^19",
+
+    "eslint": "^10.8.0",
+
+    "eslint-config-next": "16.2.6",
+
+    "postcss": "^8.5.6",
+
+    "shadcn": "^4.16.1",
+
+    "tailwindcss": "4.3.3",
+
+    "typescript": "5.7.3"
+
+  },
+
+  "pnpm": {
+
+    "overrides": {
+
+      "hono": "4.12.25"
+
+    }
+
+  }
+
+}
+
+2.2 postcss.config.mjs
+
+/** @type {import('postcss-load-config').Config} */
+
+const config = {
+
+  plugins: {
+
+    "@tailwindcss/postcss": {},
+
+  },
+
+};
+
+export default config;
+
+2.3 DELETE tailwind.config.ts
+
+Root cause: you run Tailwind v4 (@import "tailwindcss" in globals.css). v4 is CSS-first and ignores tailwind.config.ts unless it is explicitly loaded with @config. Your entire theme — bg-background, text-brand-teal, border-border, font-arabic, shadow-neon-teal, animate-float-y, animate-fade-up — has been silently resolving to nothing. src/app/page.tsx literally uses font-arabic on the landing root and it has no effect.
+
+Fix: delete the file, move the tokens into @theme in globals.css.
+
+rm tailwind.config.ts
+
+2.4 src/app/globals.css
+
+Complete file. The @theme block is new; the hand-written .font-arabic / .font-cairo / .font-en / .animate-* classes are removed because Tailwind now generates them from theme tokens (leaving both would produce duplicate, conflicting rules).
+
+@import "tailwindcss";
+
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+
+   Design tokens  (Tailwind v4 — replaces tailwind.config.ts)
+
+   Every key here generates the matching utility:
+
+     --color-*   -> bg-* / text-* / border-*
+
+     --font-*    -> font-*
+
+     --shadow-*  -> shadow-*
+
+     --animate-* -> animate-*
+
+============================================================ */
+
+@theme {
+
+  /* Surfaces */
+
+  --color-background: #05070e;
+
+  --color-background-deep: #05070d;
+
+  --color-foreground: #f4f7fb;
+
+  --color-surface: #121a2b;
+
+  --color-surface-soft: #0d1424;
+
+  --color-surface-elevated: #1a2438;
+
+  --color-card: #0b0f1c;
+
+  --color-card-elevated: #0d1424;
+
+  --color-popover: #0d1424;
+
+  --color-popover-foreground: #f4f7fb;
+
+  --color-sidebar: #080b14;
+
+  --color-sidebar-foreground: #f4f7fb;
+
+  --color-header: #070a12;
+
+  --color-chip: #0f1526;
+
+  /* Brand */
+
+  --color-brand-teal: #2de2c5;
+
+  --color-brand-mint: #5bf0d6;
+
+  --color-brand-coral: #ff6b6b;
+
+  --color-brand-rose: #ff8e8e;
+
+  --color-primary: #22e0c8;
+
+  --color-primary-foreground: #05070e;
+
+  --color-primary-teal: #2de2c5;
+
+  --color-primary-coral: #ff6b6b;
+
+  --color-primary-peach: #ffa07a;
+
+  --color-secondary: #0f1526;
+
+  --color-secondary-foreground: #f4f7fb;
+
+  --color-secondary-coral: #ff6b6b;
+
+  --color-accent: #0f1526;
+
+  --color-accent-foreground: #f4f7fb;
+
+  --color-accent-cyan: #00f2fe;
+
+  --color-accent-emerald: #2ecc71;
+
+  --color-muted: #0f1526;
+
+  --color-muted-foreground: #9fb0c6;
+
+  --color-muted-text: #9aa7c0;
+
+  --color-gold: #fbbf24;
+
+  --color-purple: #7c6cff;
+
+  --color-pink: #ff4d7a;
+
+  /* Lines */
+
+  --color-border: rgba(255, 255, 255, 0.06);
+
+  --color-border-strong: rgba(255, 255, 255, 0.1);
+
+  --color-input: rgba(255, 255, 255, 0.1);
+
+  --color-ring: #00afc2;
+
+  /* Radius */
+
+  --radius: 0.75rem;
+
+  /* Typography — variables come from next/font in src/app/layout.tsx */
+
+  --font-sans: var(--font-outfit), var(--font-inter), sans-serif;
+
+  --font-arabic: var(--font-cairo), var(--font-readex-pro), sans-serif;
+
+  --font-cairo: var(--font-cairo), var(--font-readex-pro), sans-serif;
+
+  --font-en: var(--font-plus-jakarta), var(--font-inter), sans-serif;
+
+  /* Shadows */
+
+  --shadow-neon-teal:
+
+    0 0 0 1px rgba(45, 226, 197, 0.5), 0 0 22px rgba(45, 226, 197, 0.35),
+
+    inset 0 0 18px rgba(45, 226, 197, 0.12);
+
+  --shadow-neon-coral:
+
+    0 0 0 1px rgba(255, 107, 107, 0.5), 0 0 22px rgba(255, 107, 107, 0.35),
+
+    inset 0 0 18px rgba(255, 107, 107, 0.12);
+
+  --shadow-soft-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.65);
+
+  /* Animations (keyframes are declared globally below) */
+
+  --animate-float-y: float-y 6s ease-in-out infinite;
+
+  --animate-pulse-ring: pulse-ring 4s ease-in-out infinite;
+
+  --animate-spin-slow: spin-slow 26s linear infinite;
+
+  --animate-fade-up: fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  --animate-shimmer: shimmer 6s linear infinite;
+
+  --animate-slide-up: slide-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+
+  --animate-scale-up: scale-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+
+  --animate-fade: fade-in-soft 0.5s ease-out forwards;
+
+}
+
+/* ============================================================
+
+   Legacy aliases — consumed by the hand-written CSS below
+
+============================================================ */
+
+:root {
+
+  color-scheme: dark;
+
+  --background: var(--color-background);
+
+  --foreground: var(--color-foreground);
+
+  --card: var(--color-card);
+
+  --card-foreground: var(--color-foreground);
+
+  --popover: var(--color-popover);
+
+  --popover-foreground: var(--color-foreground);
+
+  --primary: var(--color-primary);
+
+  --primary-foreground: var(--color-primary-foreground);
+
+  --secondary: var(--color-secondary);
+
+  --secondary-foreground: var(--color-foreground);
+
+  --muted: var(--color-muted);
+
+  --muted-foreground: var(--color-muted-foreground);
+
+  --accent: var(--color-accent);
+
+  --accent-foreground: var(--color-foreground);
+
+  --border: var(--color-border);
+
+  --input: var(--color-input);
+
+  --ring: var(--color-ring);
+
+  --radius: 0.75rem;
+
+  --wf-page: var(--color-background);
+
+  --wf-sidebar: var(--color-sidebar);
+
+  --wf-header: var(--color-header);
+
+  --wf-card: var(--color-card);
+
+  --wf-card-2: var(--color-card-elevated);
+
+  --wf-chip: var(--color-chip);
+
+  --wf-line: var(--color-border);
+
+  --wf-line-strong: var(--color-border-strong);
+
+  --wf-cyan: #22e0c8;
+
+  --wf-teal: #00afc2;
+
+  --wf-pink: #ff4d7a;
+
+  --wf-purple: #7c6cff;
+
+  --wf-gold: #fbbf24;
+
+  --wf-red: #ff6b6b;
+
+  --wf-text: var(--color-foreground);
+
+  --wf-text2: var(--color-muted-foreground);
+
+  --wf-text3: #64748b;
+
+  --teal: #19e6d2;
+
+  --teal-soft: rgba(25, 230, 210, 0.35);
+
+  --coral: #ff4d7a;
+
+  --coral-soft: rgba(255, 77, 122, 0.35);
+
+  --sidebar: var(--color-sidebar);
+
+  --sidebar-foreground: var(--color-foreground);
+
+  --sidebar-primary: var(--color-primary);
+
+  --sidebar-primary-foreground: var(--color-primary-foreground);
+
+  --sidebar-accent: var(--color-chip);
+
+  --sidebar-accent-foreground: var(--color-foreground);
+
+  --sidebar-border: var(--color-border);
+
+  --sidebar-ring: var(--color-ring);
+
+}
+
+/* ============================================================
+
+   Base
+
+============================================================ */
+
+@layer base {
+
+  * {
+
+    box-sizing: border-box;
+
+    border-color: var(--color-border);
+
+    outline-color: color-mix(in srgb, var(--color-ring) 50%, transparent);
+
+  }
+
+  html {
+
+    scroll-behavior: smooth;
+
+  }
+
+  body {
+
+    min-height: 100vh;
+
+    position: relative;
+
+    overflow-x: hidden;
+
+    background: var(--color-background);
+
+    color: var(--color-foreground);
+
+    font-family: var(--font-readex-pro), var(--font-outfit), sans-serif;
+
+  }
+
+}
+
+/* ============================================================
+
+   Background Glow
+
+============================================================ */
+
+body::before {
+
+  content: "";
+
+  position: fixed;
+
+  top: -15%;
+
+  right: -10%;
+
+  width: 55vw;
+
+  height: 55vw;
+
+  border-radius: 50%;
+
+  pointer-events: none;
+
+  z-index: -2;
+
+  background: radial-gradient(
+
+    circle,
+
+    rgba(45, 226, 197, 0.12) 0%,
+
+    rgba(11, 18, 32, 0) 70%
+
+  );
+
+}
+
+body::after {
+
+  content: "";
+
+  position: fixed;
+
+  bottom: -15%;
+
+  left: -10%;
+
+  width: 55vw;
+
+  height: 55vw;
+
+  border-radius: 50%;
+
+  pointer-events: none;
+
+  z-index: -2;
+
+  background: radial-gradient(
+
+    circle,
+
+    rgba(255, 107, 107, 0.11) 0%,
+
+    rgba(11, 18, 32, 0) 70%
+
+  );
+
+}
+
+/* ============================================================
+
+   Helpers
+
+============================================================ */
+
+.text-gradient-brand {
+
+  background: linear-gradient(
+
+    100deg,
+
+    #22e0c8 0%,
+
+    #7ff5e2 35%,
+
+    #ff8e8e 75%,
+
+    #ff6b6b 100%
+
+  );
+
+  -webkit-background-clip: text;
+
+  background-clip: text;
+
+  color: transparent;
+
+}
+
+.hairline {
+
+  height: 1px;
+
+  background: linear-gradient(
+
+    90deg,
+
+    transparent,
+
+    rgba(255, 255, 255, 0.12),
+
+    transparent
+
+  );
+
+}
+
+/* ============================================================
+
+   Glass Cards
+
+============================================================ */
+
+.glass-card {
+
+  background: rgba(18, 26, 43, 0.72);
+
+  backdrop-filter: blur(18px);
+
+  -webkit-backdrop-filter: blur(18px);
+
+  border: 1px solid rgba(255, 255, 255, 0.07);
+
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+
+}
+
+.glass-card-hover {
+
+  transition: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+
+}
+
+.glass-card-hover:hover {
+
+  background: rgba(26, 36, 56, 0.86);
+
+  border-color: rgba(45, 226, 197, 0.35);
+
+  transform: translateY(-4px);
+
+  box-shadow: 0 18px 48px rgba(45, 226, 197, 0.14);
+
+}
+
+/* ============================================================
+
+   Buttons
+
+============================================================ */
+
+.btn-neon {
+
+  position: relative;
+
+  border-radius: 9999px;
+
+  border: 1.5px solid #2de2c5;
+
+  background: linear-gradient(
+
+    135deg,
+
+    rgba(45, 226, 197, 0.25),
+
+    rgba(255, 107, 107, 0.2)
+
+  );
+
+  color: #fff;
+
+  font-weight: 800;
+
+  box-shadow:
+
+    0 0 20px rgba(45, 226, 197, 0.45),
+
+    0 0 36px rgba(255, 107, 107, 0.25),
+
+    inset 0 0 14px rgba(45, 226, 197, 0.15);
+
+  transition: 0.3s;
+
+}
+
+.btn-neon:hover {
+
+  transform: translateY(-2px) scale(1.02);
+
+  border-color: #7ff5e2;
+
+  background: linear-gradient(
+
+    135deg,
+
+    rgba(45, 226, 197, 0.4),
+
+    rgba(255, 107, 107, 0.3)
+
+  );
+
+}
+
+.btn-ghost {
+
+  border-radius: 9999px;
+
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+
+  background: rgba(255, 255, 255, 0.04);
+
+  color: #fff;
+
+  font-weight: 700;
+
+  transition: 0.3s;
+
+}
+
+.btn-ghost:hover {
+
+  background: rgba(255, 255, 255, 0.12);
+
+  border-color: rgba(255, 255, 255, 0.75);
+
+  transform: translateY(-2px);
+
+}
+
+/* ============================================================
+
+   Neon Text
+
+============================================================ */
+
+.neon-text-teal {
+
+  color: #7ff5e2;
+
+  text-shadow:
+
+    0 0 8px rgba(45, 226, 197, 0.65),
+
+    0 0 26px rgba(45, 226, 197, 0.35);
+
+}
+
+.neon-text-coral {
+
+  color: #ff9b9b;
+
+  text-shadow:
+
+    0 0 8px rgba(255, 107, 107, 0.65),
+
+    0 0 26px rgba(255, 107, 107, 0.35);
+
+}
+
+/* ============================================================
+
+   Hero Helpers
+
+============================================================ */
+
+.hero-ring {
+
+  border-radius: 9999px;
+
+  padding: 2px;
+
+  background: conic-gradient(
+
+    from 210deg,
+
+    rgba(45, 226, 197, 0.95),
+
+    rgba(45, 226, 197, 0.15) 28%,
+
+    rgba(255, 107, 107, 0.95) 62%,
+
+    rgba(255, 107, 107, 0.15) 86%,
+
+    rgba(45, 226, 197, 0.95)
+
+  );
+
+  box-shadow:
+
+    0 0 60px rgba(45, 226, 197, 0.18),
+
+    0 0 90px rgba(255, 107, 107, 0.14);
+
+}
+
+.icon-badge {
+
+  display: grid;
+
+  place-items: center;
+
+  border-radius: 9999px;
+
+  background: rgba(11, 18, 32, 0.85);
+
+  backdrop-filter: blur(8px);
+
+}
+
+.icon-badge--teal {
+
+  border: 1.5px solid rgba(45, 226, 197, 0.85);
+
+  color: #6ff0da;
+
+  box-shadow:
+
+    0 0 16px rgba(45, 226, 197, 0.45),
+
+    inset 0 0 12px rgba(45, 226, 197, 0.15);
+
+}
+
+.icon-badge--coral {
+
+  border: 1.5px solid rgba(255, 107, 107, 0.85);
+
+  color: #ff9b9b;
+
+  box-shadow:
+
+    0 0 16px rgba(255, 107, 107, 0.45),
+
+    inset 0 0 12px rgba(255, 107, 107, 0.15);
+
+}
+
+.blob {
+
+  position: absolute;
+
+  border-radius: 50%;
+
+  filter: blur(90px);
+
+  pointer-events: none;
+
+  z-index: 0;
+
+}
+
+/* ============================================================
+
+   Typing Engine
+
+============================================================ */
+
+.char-correct {
+
+  color: #2de2c5;
+
+  text-shadow: 0 0 14px rgba(45, 226, 197, 0.6);
+
+}
+
+.char-incorrect {
+
+  color: #ff6b6b;
+
+  background: rgba(255, 107, 107, 0.2);
+
+  border-radius: 4px;
+
+}
+
+.char-pending {
+
+  color: #4b5871;
+
+}
+
+.char-cursor {
+
+  position: relative;
+
+}
+
+.char-cursor::after {
+
+  content: "";
+
+  position: absolute;
+
+  left: 0;
+
+  right: 0;
+
+  bottom: -4px;
+
+  height: 3px;
+
+  background: #2de2c5;
+
+  border-radius: 2px;
+
+  box-shadow: 0 0 12px #2de2c5;
+
+  animation: cursor-blink 1s ease-in-out infinite;
+
+}
+
+/* ============================================================
+
+   Scrollbar
+
+============================================================ */
+
+::-webkit-scrollbar {
+
+  width: 8px;
+
+  height: 8px;
+
+}
+
+::-webkit-scrollbar-track {
+
+  background: #080b14;
+
+}
+
+::-webkit-scrollbar-thumb {
+
+  background: #22304a;
+
+  border-radius: 4px;
+
+}
+
+::-webkit-scrollbar-thumb:hover {
+
+  background: #2f405f;
+
+}
+
+/* ============================================================
+
+   Keyframes
+
+============================================================ */
+
+@keyframes float-y {
+
+  0%,
+
+  100% {
+
+    transform: translateY(0);
+
+  }
+
+  50% {
+
+    transform: translateY(-12px);
+
+  }
+
+}
+
+@keyframes pulse-ring {
+
+  0%,
+
+  100% {
+
+    opacity: 0.55;
+
+    transform: scale(1);
+
+  }
+
+  50% {
+
+    opacity: 1;
+
+    transform: scale(1.02);
+
+  }
+
+}
+
+@keyframes spin-slow {
+
+  from {
+
+    transform: rotate(0deg);
+
+  }
+
+  to {
+
+    transform: rotate(360deg);
+
+  }
+
+}
+
+@keyframes fade-up {
+
+  from {
+
+    opacity: 0;
+
+    transform: translateY(18px);
+
+  }
+
+  to {
+
+    opacity: 1;
+
+    transform: translateY(0);
+
+  }
+
+}
+
+@keyframes shimmer {
+
+  0% {
+
+    background-position: 200% 50%;
+
+  }
+
+  100% {
+
+    background-position: -200% 50%;
+
+  }
+
+}
+
+@keyframes float-orb-1 {
+
+  0% {
+
+    transform: translate(0, 0) scale(1);
+
+  }
+
+  50% {
+
+    transform: translate(-60px, 80px) scale(1.1);
+
+  }
+
+  100% {
+
+    transform: translate(40px, 40px) scale(0.95);
+
+  }
+
+}
+
+@keyframes float-orb-2 {
+
+  0% {
+
+    transform: translate(0, 0) scale(1);
+
+  }
+
+  50% {
+
+    transform: translate(80px, -60px) scale(1.15);
+
+  }
+
+  100% {
+
+    transform: translate(-50px, -30px) scale(0.9);
+
+  }
+
+}
+
+@keyframes slide-up {
+
+  from {
+
+    opacity: 0;
+
+    transform: translateY(16px);
+
+  }
+
+  to {
+
+    opacity: 1;
+
+    transform: translateY(0);
+
+  }
+
+}
+
+@keyframes scale-up {
+
+  from {
+
+    opacity: 0;
+
+    transform: scale(0.9);
+
+  }
+
+  to {
+
+    opacity: 1;
+
+    transform: scale(1);
+
+  }
+
+}
+
+@keyframes fade-in-soft {
+
+  from {
+
+    opacity: 0;
+
+  }
+
+  to {
+
+    opacity: 1;
+
+  }
+
+}
+
+@keyframes cursor-blink {
+
+  0%,
+
+  100% {
+
+    opacity: 1;
+
+  }
+
+  50% {
+
+    opacity: 0.3;
+
+  }
+
+}
+
+/* ============================================================
+
+   Accessibility
+
+============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+  *,
+
+  *::before,
+
+  *::after {
+
+    animation-duration: 0.001ms !important;
+
+    animation-iteration-count: 1 !important;
+
+    transition-duration: 0.001ms !important;
+
+  }
+
+}
+
+2.5 components.json
+
+Root cause: "css": "app/globals.css" is wrong — your app lives in src/app. Any future shadcn add would write tokens into a file that doesn't exist.
+
+{
+
+  "$schema": "https://ui.shadcn.com/schema.json",
+
+  "style": "base-nova",
+
+  "rsc": true,
+
+  "tsx": true,
+
+  "tailwind": {
+
+    "config": "",
+
+    "css": "src/app/globals.css",
+
+    "baseColor": "neutral",
+
+    "cssVariables": true,
+
+    "prefix": ""
+
+  },
+
+  "aliases": {
+
+    "components": "@/components",
+
+    "utils": "@/lib/utils",
+
+    "ui": "@/components/ui",
+
+    "lib": "@/lib",
+
+    "hooks": "@/hooks"
+
+  },
+
+  "iconLibrary": "lucide"
+
+}
+
+2.6 next.config.mjs
+
+Root cause: no security headers at all, and poweredByHeader leaks the stack. images.unoptimized: true makes qualities meaningless but harmless — kept so next/image works without an optimizer.
+
+/** @type {import('next').NextConfig} */
+
+const nextConfig = {
+
+  reactStrictMode: true,
+
+  poweredByHeader: false,
+
+  images: {
+
+    unoptimized: true,
+
+    qualities: [75, 90],
+
+  },
+
+  async headers() {
+
+    return [
+
+      {
+
+        source: "/:path*",
+
+        headers: [
+
+          { key: "X-Content-Type-Options", value: "nosniff" },
+
+          { key: "X-Frame-Options", value: "DENY" },
+
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+
+          {
+
+            key: "Permissions-Policy",
+
+            value: "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+
+          },
+
+          {
+
+            key: "Strict-Transport-Security",
+
+            value: "max-age=63072000; includeSubDomains; preload",
+
+          },
+
+        ],
+
+      },
+
+    ];
+
+  },
+
+};
+
+export default nextConfig;
+
+2.7 DELETE src/middleware.ts
+
+rm src/middleware.ts
+
+It is ignored by Next 16 and, worse, it is the file everyone will believe is protecting the app.
+
+2.8 NEW src/proxy.ts
+
+Root cause / why this shape: proxy runs on every request at the network boundary and is not an auth boundary. Its only jobs here are (1) rotate the Supabase auth cookies so server components never see a stale token, and (2) cheap optimistic redirects for UX. No DB reads, no onboarding logic, no cookie mangling.
+
+import { NextResponse, type NextRequest } from "next/server";
+
+import { createServerClient } from "@supabase/ssr";
+
+/**
+
+ * Next.js 16 renamed `middleware.ts` -> `proxy.ts` (exported fn: `proxy`).
+
+ *
+
+ * SCOPE — deliberately small:
+
+ *   1. Refresh the Supabase auth cookies (the only place this can happen
+
+ *      for every navigation).
+
+ *   2. Optimistic UX redirects.
+
+ *
+
+ * This is NOT the authorization boundary. Real authorization lives in
+
+ * ProtectedShell / OnboardingShell / server actions / route handlers.
+
+ * See CVE-2025-29927 for why proxy-only auth is unsafe.
+
+ *
+
+ * Cookie options from @supabase/ssr are passed through UNCHANGED. Forcing
+
+ * httpOnly here would hide the session from createBrowserClient(), which
+
+ * reads document.cookie.
+
+ */
+
+const PROTECTED_PREFIXES = [
+
+  "/dashboard",
+
+  "/stories",
+
+  "/story",
+
+  "/vocabulary",
+
+  "/paths",
+
+  "/stats",
+
+  "/challenges",
+
+  "/profile",
+
+  "/settings",
+
+  "/onboarding",
+
+] as const;
+
+const AUTH_ONLY_PAGES = new Set(["/login", "/register", "/forgot-password"]);
+
+function isInternalPath(path: string): boolean {
+
+  return path.startsWith("/") && !path.startsWith("//") && !path.includes("\\");
+
+}
+
+export async function proxy(request: NextRequest) {
+
+  let response = NextResponse.next({ request });
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  // Never hard-crash the whole site on a misconfigured deploy; the data layer
+
+  // throws a descriptive error instead.
+
+  if (!supabaseUrl || !supabaseAnonKey) return response;
+
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+
+    cookies: {
+
+      getAll() {
+
+        return request.cookies.getAll();
+
+      },
+
+      setAll(cookiesToSet) {
+
+        cookiesToSet.forEach(({ name, value }) => {
+
+          request.cookies.set(name, value);
+
+        });
+
+        response = NextResponse.next({ request });
+
+        cookiesToSet.forEach(({ name, value, options }) => {
+
+          response.cookies.set(name, value, options);
+
+        });
+
+      },
+
+    },
+
+  });
+
+  // Rotates the access token when needed and writes the new cookies.
+
+  const {
+
+    data: { user },
+
+  } = await supabase.auth.getUser();
+
+  const { pathname, search } = request.nextUrl;
+
+  const isProtected = PROTECTED_PREFIXES.some(
+
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+
+  );
+
+  if (isProtected && !user) {
+
+    const url = request.nextUrl.clone();
+
+    url.pathname = "/login";
+
+    url.search = "";
+
+    url.searchParams.set("next", `${pathname}${search}`);
+
+    return NextResponse.redirect(url);
+
+  }
+
+  if (user && AUTH_ONLY_PAGES.has(pathname)) {
+
+    const requested = request.nextUrl.searchParams.get("next");
+
+    const url = request.nextUrl.clone();
+
+    url.pathname = requested && isInternalPath(requested) ? requested : "/dashboard";
+
+    url.search = "";
+
+    return NextResponse.redirect(url);
+
+  }
+
+  return response;
+
+}
+
+export const config = {
+
+  matcher: [
+
+    /*
+
+     * Everything except:
+
+     *  - Next internals and static assets
+
+     *  - /auth/* (callback + confirm perform their own code exchange and must
+
+     *    not race with a session refresh)
+
+     */
+
+    "/((?!_next/static|_next/image|auth/|favicon.ico|images/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|mp3|wav|woff2?)$).*)",
+
+  ],
+
+};
+
+2.9 DELETE src/lib/env.ts → split into two modules
+
+Root cause: a single module containing both public and secret schemas is imported by src/lib/supabase/client.ts, i.e. it is in the browser bundle. Next replaces non-NEXT_PUBLIC_ process.env reads with undefined in client builds, so nothing leaks today — but the guard is a runtime typeof window check, one refactor away from shipping a service-role key. Also NEXT_PUBLIC_SITE_URL being hard-required breaks preview deploys where only VERCEL_URL exists.
+
+rm src/lib/env.ts
+
+src/lib/env/public.ts
+
+import { z } from "zod";
+
+/**
+
+ * Browser-safe environment.
+
+ *
+
+ * Rules:
+
+ *  · No fallbacks for real credentials. Ever. Fail loud.
+
+ *  · Every process.env read is STATIC so Next can inline it client-side.
+
+ *  · Validation is LAZY (called from inside functions), so `next build`
+
+ *    does not explode while collecting page data.
+
+ */
+
+const publicSchema = z.object({
+
+  NEXT_PUBLIC_SUPABASE_URL: z.url("NEXT_PUBLIC_SUPABASE_URL يجب أن يكون رابطاً صالحاً"),
+
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: z
+
+    .string()
+
+    .min(40, "NEXT_PUBLIC_SUPABASE_ANON_KEY مفقود أو قصير"),
+
+  NEXT_PUBLIC_SITE_URL: z.url("NEXT_PUBLIC_SITE_URL يجب أن يكون رابطاً صالحاً"),
+
+});
+
+export type PublicEnv = z.infer<typeof publicSchema>;
+
+export function formatEnvIssues(issues: readonly { path: PropertyKey[]; message: string }[]): never {
+
+  const details = issues.map((i) => `  · ${i.path.join(".")}: ${i.message}`).join("\n");
+
+  throw new Error(`\n[env] إعدادات البيئة غير صالحة:\n${details}\n`);
+
+}
+
+/**
+
+ * Resolves the canonical site origin.
+
+ * Order: explicit NEXT_PUBLIC_SITE_URL -> Vercel production -> Vercel preview
+
+ *        -> localhost (development only).
+
+ */
+
+function resolveSiteUrl(): string | undefined {
+
+  if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL;
+
+  const prod = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+
+  if (prod) return `https://${prod}`;
+
+  const preview = process.env.VERCEL_URL;
+
+  if (preview) return `https://${preview}`;
+
+  if (process.env.NODE_ENV !== "production") return "http://localhost:3000";
+
+  return undefined;
+
+}
+
+let cached: PublicEnv | null = null;
+
+export function publicEnv(): PublicEnv {
+
+  if (cached) return cached;
+
+  const parsed = publicSchema.safeParse({
+
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+
+    NEXT_PUBLIC_SITE_URL: resolveSiteUrl(),
+
+  });
+
+  if (!parsed.success) formatEnvIssues(parsed.error.issues);
+
+  cached = parsed.data;
+
+  return cached;
+
+}
+
+/** Canonical origin without a trailing slash — safe for building redirect URLs. */
+
+export function siteOrigin(): string {
+
+  return new URL(publicEnv().NEXT_PUBLIC_SITE_URL).origin;
+
+}
+
+src/lib/env/server.ts
+
+import "server-only";
+
+import { z } from "zod";
+
+import { formatEnvIssues, publicEnv, type PublicEnv } from "@/lib/env/public";
+
+/**
+
+ * Server-only secrets.
+
+ *
+
+ * `import "server-only"` turns a client import of this module into a BUILD
+
+ * error rather than a silent runtime `undefined`. That is the actual guard —
+
+ * a `typeof window` check is not one.
+
+ *
+
+ * Secrets are validated in independent groups so a project without ElevenLabs
+
+ * or Kokoro still boots, and so an AI route's missing key cannot take down
+
+ * authentication.
+
+ */
+
+const coreServerSchema = z.object({
+
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(40, "SUPABASE_SERVICE_ROLE_KEY مفقود"),
+
+});
+
+const geminiSchema = z.object({
+
+  GEMINI_API_KEY: z.string().min(10, "GEMINI_API_KEY مفقود"),
+
+});
+
+const speechSchema = z.object({
+
+  ELEVENLABS_API_KEY: z.string().min(10).optional(),
+
+  KOKORO_API_URL: z.url().optional(),
+
+});
+
+export type CoreServerEnv = PublicEnv & z.infer<typeof coreServerSchema>;
+
+export type GeminiEnv = z.infer<typeof geminiSchema>;
+
+export type SpeechEnv = z.infer<typeof speechSchema>;
+
+let cachedCore: CoreServerEnv | null = null;
+
+let cachedGemini: GeminiEnv | null = null;
+
+let cachedSpeech: SpeechEnv | null = null;
+
+/** Supabase service role + public vars. Required by admin client and guards. */
+
+export function serverEnv(): CoreServerEnv {
+
+  if (cachedCore) return cachedCore;
+
+  const parsed = coreServerSchema.safeParse({
+
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+
+  });
+
+  if (!parsed.success) formatEnvIssues(parsed.error.issues);
+
+  cachedCore = { ...publicEnv(), ...parsed.data };
+
+  return cachedCore;
+
+}
+
+/** Only call from /api/ai/*. Throws a descriptive error if unset. */
+
+export function geminiEnv(): GeminiEnv {
+
+  if (cachedGemini) return cachedGemini;
+
+  const parsed = geminiSchema.safeParse({ GEMINI_API_KEY: process.env.GEMINI_API_KEY });
+
+  if (!parsed.success) formatEnvIssues(parsed.error.issues);
+
+  cachedGemini = parsed.data;
+
+  return cachedGemini;
+
+}
+
+/** Optional TTS providers. Never throws — callers decide the fallback. */
+
+export function speechEnv(): SpeechEnv {
+
+  if (cachedSpeech) return cachedSpeech;
+
+  const parsed = speechSchema.safeParse({
+
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
+
+    KOKORO_API_URL: process.env.KOKORO_API_URL,
+
+  });
+
+  if (!parsed.success) formatEnvIssues(parsed.error.issues);
+
+  cachedSpeech = parsed.data;
+
+  return cachedSpeech;
+
+}
+
+2.10 src/lib/supabase/client.ts
+
+"use client";
+
+import { createBrowserClient } from "@supabase/ssr";
+
+import { publicEnv } from "@/lib/env/public";
+
+import type { Database } from "@/types/database";
+
+/**
+
+ * Browser client — reads/writes the session from document.cookie.
+
+ *
+
+ * Memoised: createBrowserClient() spins up its own auth state machine and
+
+ * refresh timer. Calling it per render (as the login page did) creates
+
+ * duplicate token-refresh loops that race each other and can revoke a
+
+ * perfectly good refresh token.
+
+ */
+
+let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
+
+export function createClient() {
+
+  if (browserClient) return browserClient;
+
+  const env = publicEnv();
+
+  browserClient = createBrowserClient<Database>(
+
+    env.NEXT_PUBLIC_SUPABASE_URL,
+
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  );
+
+  return browserClient;
+
+}
+
+2.11 src/lib/supabase/server.ts
+
+import "server-only";
+
+import { createServerClient } from "@supabase/ssr";
+
+import { cookies } from "next/headers";
+
+import { publicEnv } from "@/lib/env/public";
+
+import type { Database } from "@/types/database";
+
+/**
+
+ * Session-bound server client — always subject to RLS.
+
+ *
+
+ * The empty catch is intentional and correct: Server Components may not
+
+ * mutate cookies. proxy.ts owns cookie rotation. Server Actions and Route
+
+ * Handlers CAN write, and do so through this same path.
+
+ */
+
+export async function createClient() {
+
+  const cookieStore = await cookies();
+
+  const env = publicEnv();
+
+  return createServerClient<Database>(
+
+    env.NEXT_PUBLIC_SUPABASE_URL,
+
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+
+    {
+
+      cookies: {
+
+        getAll() {
+
+          return cookieStore.getAll();
+
+        },
+
+        setAll(cookiesToSet) {
+
+          try {
+
+            cookiesToSet.forEach(({ name, value, options }) => {
+
+              cookieStore.set(name, value, options);
+
+            });
+
+          } catch {
+
+            // Called from a Server Component — proxy.ts syncs the cookies.
+
+          }
+
+        },
+
+      },
+
+    }
+
+  );
+
+}
+
+2.12 src/lib/supabase/admin.ts
+
+import "server-only";
+
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
+
+import { serverEnv } from "@/lib/env/server";
+
+import type { Database } from "@/types/database";
+
+/**
+
+ * Service-role client — bypasses RLS entirely.
+
+ *
+
+ * Allowed uses ONLY:
+
+ *   · SECURITY DEFINER rpc calls (award_xp, record_line_attempt, ...)
+
+ *   · check_rate_limit
+
+ *   · ai_usage_log writes
+
+ *   · the seed script
+
+ *
+
+ * `import "server-only"` makes importing this from a Client Component a
+
+ * build error, which is the guarantee the old runtime `typeof window` check
+
+ * could not give.
+
+ *
+
+ * Memoised: a new supabase-js instance per request leaks sockets under load.
+
+ */
+
+let adminClient: ReturnType<typeof createSupabaseClient<Database>> | null = null;
+
+export function createAdminClient() {
+
+  if (adminClient) return adminClient;
+
+  const env = serverEnv();
+
+  adminClient = createSupabaseClient<Database>(
+
+    env.NEXT_PUBLIC_SUPABASE_URL,
+
+    env.SUPABASE_SERVICE_ROLE_KEY,
+
+    {
+
+      auth: {
+
+        persistSession: false,
+
+        autoRefreshToken: false,
+
+        detectSessionInUrl: false,
+
+      },
+
+    }
+
+  );
+
+  return adminClient;
+
+}
+
+2.13 NEW src/lib/auth/session.ts — the single source of truth
+
+This is the file that fixes the bug.
+
+import "server-only";
+
+import { cache } from "react";
+
+import type { User } from "@supabase/supabase-js";
+
+import { createClient } from "@/lib/supabase/server";
+
+import type { CefrLevel } from "@/types/database";
+
+/**
+
+ * THE single definition of "who is this and are they onboarded".
+
+ *
+
+ * Before: three competing definitions —
+
+ *   · middleware read a JWT claim (app_metadata.onboarding_completed) that is
+
+ *     only ever written by a DB trigger on a transition almost no row makes;
+
+ *   · the login page checked four nullable profile columns in the browser;
+
+ *   · /auth/callback checked profiles.onboarding_completed_at.
+
+ * They disagreed, so every logged-in user was bounced to /onboarding/nickname.
+
+ *
+
+ * After: profiles.onboarding_completed_at, read on the server, once.
+
+ *
+
+ * `cache()` dedupes across the whole React render pass, so a layout + page +
+
+ * nested shell all reading this issue ONE auth call and ONE profile query.
+
+ */
+
+export type OnboardingProfile = {
+
+  nickname: string | null;
+
+  country: string | null;
+
+  native_language: string | null;
+
+  english_level: CefrLevel | null;
+
+  onboarding_completed_at: string | null;
+
+};
+
+export type SessionContext = {
+
+  user: User | null;
+
+  profile: OnboardingProfile | null;
+
+  isOnboarded: boolean;
+
+};
+
+/** Ordered onboarding funnel. Order here IS the product order. */
+
+export const ONBOARDING_STEPS = [
+
+  "/onboarding/nickname",
+
+  "/onboarding/language",
+
+  "/onboarding/country",
+
+  "/onboarding/level",
+
+] as const;
+
+export const ONBOARDING_ENTRY = ONBOARDING_STEPS[0];
+
+const EMPTY: SessionContext = { user: null, profile: null, isOnboarded: false };
+
+export const getSessionContext = cache(async (): Promise<SessionContext> => {
+
+  const supabase = await createClient();
+
+  // getUser() validates the token against Supabase. Never trust getSession()
+
+  // for authorization — it only decodes a cookie.
+
+  const {
+
+    data: { user },
+
+    error,
+
+  } = await supabase.auth.getUser();
+
+  if (error || !user) return EMPTY;
+
+  const { data } = await supabase
+
+    .from("profiles")
+
+    .select("nickname, country, native_language, english_level, onboarding_completed_at")
+
+    .eq("id", user.id)
+
+    .maybeSingle();
+
+  const profile: OnboardingProfile | null = data
+
+    ? {
+
+        nickname: (data.nickname as string | null) ?? null,
+
+        country: (data.country as string | null) ?? null,
+
+        native_language: (data.native_language as string | null) ?? null,
+
+        english_level: (data.english_level as CefrLevel | null) ?? null,
+
+        onboarding_completed_at: (data.onboarding_completed_at as string | null) ?? null,
+
+      }
+
+    : null;
+
+  return {
+
+    user,
+
+    profile,
+
+    isOnboarded: Boolean(profile?.onboarding_completed_at),
+
+  };
+
+});
+
+/**
+
+ * Resume the funnel at the first unanswered question instead of always
+
+ * restarting at step 1.
+
+ */
+
+export function nextOnboardingStep(profile: OnboardingProfile | null): string {
+
+  if (!profile) return ONBOARDING_STEPS[0];
+
+  if (!profile.nickname) return ONBOARDING_STEPS[0];
+
+  if (!profile.native_language) return ONBOARDING_STEPS[1];
+
+  if (!profile.country) return ONBOARDING_STEPS[2];
+
+  return ONBOARDING_STEPS[3];
+
+}
+
+/** Only internal, non-protocol-relative paths may be used as redirect targets. */
+
+export function safeInternalPath(value: string | null | undefined, fallback = "/dashboard"): string {
+
+  if (!value) return fallback;
+
+  if (!value.startsWith("/")) return fallback;
+
+  if (value.startsWith("//")) return fallback;
+
+  if (value.includes("\\")) return fallback;
+
+  return value;
+
+}
+
+2.14 src/components/auth/protected-shell.tsx
+
+import React from "react";
+
+import { redirect } from "next/navigation";
+
+import { getSessionContext, nextOnboardingStep } from "@/lib/auth/session";
+
+/**
+
+ * The real authorization boundary for signed-in areas.
+
+ *
+
+ * proxy.ts is an optimisation, not a guard: it is bypassable, it is ignored
+
+ * for excluded paths, and one matcher typo silently exposes a whole section.
+
+ * This runs inside the render, on the server, with a verified token.
+
+ *
+
+ * It also owns the onboarding gate, so there is exactly ONE place in the
+
+ * codebase that can send a user to /onboarding.
+
+ */
+
+export async function ProtectedShell({ children }: { children: React.ReactNode }) {
+
+  const { user, profile, isOnboarded } = await getSessionContext();
+
+  if (!user) redirect("/login");
+
+  if (!isOnboarded) redirect(nextOnboardingStep(profile));
+
+  return <>{children}</>;
+
+}
+
+2.15 NEW src/components/auth/onboarding-shell.tsx
+
+import React from "react";
+
+import { redirect } from "next/navigation";
+
+import { getSessionContext } from "@/lib/auth/session";
+
+/**
+
+ * Guard for /onboarding/*.
+
+ *
+
+ * Mirrors ProtectedShell against the SAME flag, which is what makes a
+
+ * redirect loop structurally impossible:
+
+ *   ProtectedShell : signed in AND !onboarded -> /onboarding/<step>
+
+ *   OnboardingShell: signed in AND  onboarded -> /dashboard
+
+ * One boolean, two complementary branches.
+
+ *
+
+ * `allowCompleted` lets already-onboarded users retake the placement test.
+
+ */
+
+export async function OnboardingShell({
+
+  children,
+
+  allowCompleted = false,
+
+}: {
+
+  children: React.ReactNode;
+
+  allowCompleted?: boolean;
+
+}) {
+
+  const { user, isOnboarded } = await getSessionContext();
+
+  if (!user) redirect("/login");
+
+  if (isOnboarded && !allowCompleted) redirect("/dashboard");
+
+  return <>{children}</>;
+
+}
+
+2.16 src/app/onboarding/layout.tsx
+
+import React from "react";
+
+import { OnboardingShell } from "@/components/auth/onboarding-shell";
+
+export default function OnboardingLayout({ children }: { children: React.ReactNode }) {
+
+  return <OnboardingShell>{children}</OnboardingShell>;
+
+}
+
+2.17 NEW src/app/onboarding/page.tsx
+
+Root cause: /auth/callback redirected to /onboarding, and /onboarding had no page.tsx — every OAuth sign-up landed on a 404.
+
+import { redirect } from "next/navigation";
+
+import { getSessionContext, nextOnboardingStep } from "@/lib/auth/session";
+
+/**
+
+ * /onboarding was a 404: only a layout existed, yet /auth/callback redirected
+
+ * here. Now it is the funnel entry point and resumes at the first unanswered
+
+ * step.
+
+ */
+
+export default async function OnboardingIndexPage() {
+
+  const { profile } = await getSessionContext();
+
+  redirect(nextOnboardingStep(profile));
+
+}
+
+2.18 NEW src/app/onboarding/auto-test/layout.tsx
+
+import React from "react";
+
+import { OnboardingShell } from "@/components/auth/onboarding-shell";
+
+/**
+
+ * The placement test is reachable both during onboarding and later from
+
+ * settings, so completed users must not be bounced to /dashboard here.
+
+ */
+
+export default function AutoTestLayout({ children }: { children: React.ReactNode }) {
+
+  return <OnboardingShell allowCompleted>{children}</OnboardingShell>;
+
+}
+
+2.19 NEW src/app/dashboard/layout.tsx
+
+Root cause: /dashboard had no ProtectedShell — unlike every other protected folder. Its only guard was an inline getUser() in the page (which does not enforce onboarding) plus dead middleware.
+
+import React from "react";
+
+import { ProtectedShell } from "@/components/auth/protected-shell";
+
+export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+
+  return <ProtectedShell>{children}</ProtectedShell>;
+
+}
+
+2.20 src/app/dashboard/page.tsx
+
+Root cause: duplicated the auth check the layout now performs (a second getUser() round-trip per request) and hardcoded a background colour that fights the theme.
+
+import React from "react";
+
+import AppSidebar from "@/components/layout/app-sidebar";
+
+import { LegacyProgressMigrator } from "@/components/migration/legacy-progress-migrator";
+
+import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+
+import { DashboardHero } from "@/components/dashboard/DashboardHero";
+
+import { StatCards } from "@/components/dashboard/StatCards";
+
+import { StoryOfTheDay } from "@/components/dashboard/StoryOfTheDay";
+
+import { VocabularyReview } from "@/components/dashboard/VocabularyReview";
+
+import { WeeklyChallenge } from "@/components/dashboard/WeeklyChallenge";
+
+import { AllStoriesList } from "@/components/dashboard/AllStoriesList";
+
+/**
+
+ * Auth + onboarding are enforced by src/app/dashboard/layout.tsx
+
+ * (ProtectedShell). The inline getUser() that used to live here was a second
+
+ * network round-trip per request and did NOT enforce onboarding, so it could
+
+ * disagree with the rest of the app.
+
+ */
+
+export default function DashboardPage() {
+
+  return (
+
+    <div className="flex min-h-screen select-none bg-background font-sans text-foreground" dir="ltr">
+
+      <LegacyProgressMigrator />
+
+      <AppSidebar active="الرئيسية" />
+
+      <div className="flex min-w-0 flex-1 flex-col">
+
+        <DashboardHeader />
+
+        <main className="flex-1 space-y-6 overflow-y-auto p-8" dir="rtl">
+
+          <DashboardHero />
+
+          <StatCards />
+
+          <section className="grid grid-cols-12 gap-5" dir="ltr">
+
+            <StoryOfTheDay />
+
+            <VocabularyReview />
+
+          </section>
+
+          <section className="grid grid-cols-12 items-stretch gap-5" dir="rtl">
+
+            <WeeklyChallenge />
+
+            <AllStoriesList />
+
+          </section>
+
+        </main>
+
+      </div>
+
+    </div>
+
+  );
+
+}
+
+2.21 src/app/auth/callback/route.ts
+
+Root causes: (1) redirected to a 404 /onboarding; (2) built redirects from request.nextUrl.origin, which behind a proxy/load balancer can be the internal origin — an open door for host-header confusion; (3) had no force-dynamic, so Next can attempt to treat it as static; (4) ignored next.
+
+import { NextResponse, type NextRequest } from "next/server";
+
+import { createClient } from "@/lib/supabase/server";
+
+import { siteOrigin } from "@/lib/env/public";
+
+import { safeInternalPath } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
+
+/**
+
+ * OAuth / PKCE code exchange.
+
+ *
+
+ * Redirects are built from the CANONICAL origin (NEXT_PUBLIC_SITE_URL), not
+
+ * from request.nextUrl.origin, which is attacker-influenceable behind a proxy
+
+ * via the Host header.
+
+ *
+
+ * Destination is decided from profiles.onboarding_completed_at — the same
+
+ * flag ProtectedShell uses — so the callback can never disagree with the
+
+ * shells and cause a bounce.
+
+ */
+
+export async function GET(request: NextRequest) {
+
+  const origin = siteOrigin();
+
+  const { searchParams } = request.nextUrl;
+
+  const oauthError = searchParams.get("error_description") ?? searchParams.get("error");
+
+  if (oauthError) {
+
+    return NextResponse.redirect(`${origin}/login?error=oauth_failed`);
+
+  }
+
+  const code = searchParams.get("code");
+
+  if (!code) {
+
+    return NextResponse.redirect(`${origin}/login?error=missing_code`);
+
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+
+  if (error || !data.user) {
+
+    return NextResponse.redirect(`${origin}/login?error=oauth_failed`);
+
+  }
+
+  const { data: profile } = await supabase
+
+    .from("profiles")
+
+    .select("onboarding_completed_at")
+
+    .eq("id", data.user.id)
+
+    .maybeSingle();
+
+  if (!profile?.onboarding_completed_at) {
+
+    return NextResponse.redirect(`${origin}/onboarding`);
+
+  }
+
+  const next = safeInternalPath(searchParams.get("next"), "/dashboard");
+
+  return NextResponse.redirect(`${origin}${next}`);
+
+}
+
+2.22 src/app/auth/confirm/route.ts
+
+Root causes: same host-header issue; type was cast straight from the query string to EmailOtpType (unvalidated cast — you asked me to find these); and a confirmed new user was sent to /dashboard, which now correctly bounces them to onboarding, so send them to /onboarding directly and skip a redirect hop.
+
+import { NextResponse, type NextRequest } from "next/server";
+
+import type { EmailOtpType } from "@supabase/supabase-js";
+
+import { createClient } from "@/lib/supabase/server";
+
+import { siteOrigin } from "@/lib/env/public";
+
+import { safeInternalPath } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
+
+/**
+
+ * Single entry point for every emailed link: signup confirmation, password
+
+ * recovery, email change, magic link.
+
+ *
+
+ * `type` is now VALIDATED against a whitelist instead of being cast with
+
+ * `as EmailOtpType`, which accepted arbitrary attacker-supplied strings.
+
+ */
+
+const VALID_OTP_TYPES = new Set<EmailOtpType>([
+
+  "signup",
+
+  "invite",
+
+  "magiclink",
+
+  "recovery",
+
+  "email_change",
+
+  "email",
+
+]);
+
+function parseOtpType(value: string | null): EmailOtpType | null {
+
+  if (!value) return null;
+
+  return VALID_OTP_TYPES.has(value as EmailOtpType) ? (value as EmailOtpType) : null;
+
+}
+
+export async function GET(request: NextRequest) {
+
+  const origin = siteOrigin();
+
+  const { searchParams } = request.nextUrl;
+
+  const tokenHash = searchParams.get("token_hash");
+
+  const type = parseOtpType(searchParams.get("type"));
+
+  if (!tokenHash || !type) {
+
+    return NextResponse.redirect(`${origin}/login?error=invalid_link`);
+
+  }
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
+
+  if (error || !data.user) {
+
+    return NextResponse.redirect(`${origin}/login?error=expired_link`);
+
+  }
+
+  // Recovery hands the user a short-lived session whose only purpose is
+
+  // setting a new password.
+
+  if (type === "recovery") {
+
+    return NextResponse.redirect(`${origin}/reset-password`);
+
+  }
+
+  const { data: profile } = await supabase
+
+    .from("profiles")
+
+    .select("onboarding_completed_at")
+
+    .eq("id", data.user.id)
+
+    .maybeSingle();
+
+  if (!profile?.onboarding_completed_at) {
+
+    return NextResponse.redirect(`${origin}/onboarding`);
+
+  }
+
+  const next = safeInternalPath(searchParams.get("next"), "/dashboard");
+
+  return NextResponse.redirect(`${origin}${next}`);
+
+}
+
+2.23 src/lib/auth/guards.ts
+
+Root causes: assertSameOrigin() compared against NEXT_PUBLIC_SITE_URL only, so every preview deployment's write actions 403'd; enforceRateLimit assumed the rpc returns a row shape while database.ts declares Returns: boolean (type lie); HttpError details could leak upstream messages.
+
+import "server-only";
+
+import { headers } from "next/headers";
+
+import type { User } from "@supabase/supabase-js";
+
+import { createClient } from "@/lib/supabase/server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+import { siteOrigin } from "@/lib/env/public";
+
+/** Uniform error, later mapped to 401/403/429/503. */
+
+export class HttpError extends Error {
+
+  constructor(
+
+    public readonly status: number,
+
+    message: string,
+
+    public readonly retryAfterSeconds?: number
+
+  ) {
+
+    super(message);
+
+    this.name = "HttpError";
+
+  }
+
+}
+
+/**
+
+ * First line of every Server Action and Route Handler.
+
+ * getUser() verifies the token with Supabase — getSession() only decodes a
+
+ * cookie and must never be used for authorization.
+
+ */
+
+export async function requireUser(): Promise<User> {
+
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error || !data.user) {
+
+    throw new HttpError(401, "يجب تسجيل الدخول");
+
+  }
+
+  const isEmailProvider = data.user.app_metadata?.provider === "email";
+
+  if (isEmailProvider && !data.user.email_confirmed_at) {
+
+    throw new HttpError(403, "يرجى تأكيد بريدك الإلكتروني أولاً");
+
+  }
+
+  return data.user;
+
+}
+
+/**
+
+ * CSRF defence in depth for write paths.
+
+ *
+
+ * Before: compared Origin against NEXT_PUBLIC_SITE_URL only, so every Vercel
+
+ * preview deployment 403'd on sign-in, onboarding and settings.
+
+ * After: the request's own Host is also accepted, which is exactly what
+
+ * same-origin means. Next 16 additionally performs its own Server Action
+
+ * origin check; this covers Route Handlers too.
+
+ */
+
+export async function assertSameOrigin(): Promise<void> {
+
+  const h = await headers();
+
+  const origin = h.get("origin");
+
+  // Same-origin navigations and Server Action invocations may omit Origin.
+
+  if (!origin) return;
+
+  const allowed = new Set<string>([siteOrigin()]);
+
+  const forwardedHost = h.get("x-forwarded-host") ?? h.get("host");
+
+  if (forwardedHost) {
+
+    const proto = h.get("x-forwarded-proto") ?? "https";
+
+    allowed.add(`${proto}://${forwardedHost}`);
+
+  }
+
+  if (!allowed.has(origin)) {
+
+    throw new HttpError(403, "طلب من مصدر غير مسموح");
+
+  }
+
+}
+
+export async function clientIp(): Promise<string> {
+
+  const h = await headers();
+
+  return (
+
+    h.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+
+    h.get("x-real-ip") ??
+
+    "unknown"
+
+  );
+
+}
+
+export type RateLimitRule = { limit: number; windowSeconds: number };
+
+export const RATE_LIMITS = {
+
+  signIn: { limit: 5, windowSeconds: 15 * 60 },
+
+  passwordReset: { limit: 3, windowSeconds: 60 * 60 },
+
+  aiExplain: { limit: 20, windowSeconds: 60 * 60 },
+
+  tts: { limit: 200, windowSeconds: 60 * 60 },
+
+  progressWrite: { limit: 120, windowSeconds: 60 },
+
+} satisfies Record<string, RateLimitRule>;
+
+type RateLimitRow = { allowed?: boolean; retry_after_seconds?: number };
+
+/**
+
+ * Atomic Postgres check_rate_limit.
+
+ *
+
+ * The rpc may return either a bare boolean or a single-row table depending on
+
+ * the migration, so both shapes are handled explicitly instead of being
+
+ * force-cast.
+
+ *
+
+ * Fails CLOSED: if the limiter itself is down we do not throw the expensive
+
+ * routes wide open.
+
+ */
+
+export async function enforceRateLimit(
+
+  scope: string,
+
+  identifier: string,
+
+  rule: RateLimitRule
+
+): Promise<void> {
+
+  const admin = createAdminClient();
+
+  const { data, error } = await admin.rpc("check_rate_limit", {
+
+    p_key: `${scope}:${identifier}`,
+
+    p_limit: rule.limit,
+
+    p_window_seconds: rule.windowSeconds,
+
+  });
+
+  if (error) {
+
+    console.error("[rate-limit] rpc failed", { scope, message: error.message });
+
+    throw new HttpError(503, "تعذر التحقق من حد الطلبات، حاول لاحقاً");
+
+  }
+
+  if (typeof data === "boolean") {
+
+    if (!data) {
+
+      throw new HttpError(429, "عدد محاولات كبير، حاول بعد قليل", rule.windowSeconds);
+
+    }
+
+    return;
+
+  }
+
+  const row = (Array.isArray(data) ? data[0] : data) as RateLimitRow | null | undefined;
+
+  if (row && row.allowed === false) {
+
+    throw new HttpError(
+
+      429,
+
+      "عدد محاولات كبير، حاول بعد قليل",
+
+      row.retry_after_seconds ?? rule.windowSeconds
+
+    );
+
+  }
+
+}
+
+/** Maps HttpError to a Response for API routes. Never leaks internals. */
+
+export function toResponse(err: unknown): Response {
+
+  if (err instanceof HttpError) {
+
+    return Response.json(
+
+      { error: err.message },
+
+      {
+
+        status: err.status,
+
+        headers: err.retryAfterSeconds
+
+          ? { "Retry-After": String(err.retryAfterSeconds) }
+
+          : undefined,
+
+      }
+
+    );
+
+  }
+
+  console.error("[api] unhandled", err);
+
+  return Response.json({ error: "حدث خطأ غير متوقع" }, { status: 500 });
+
+}
+
+2.24 src/lib/validation/schemas.ts
+
+Root causes: Zod v4 is installed but the file uses the v3 z.string().email() / .url() / .uuid() idioms (deprecated in v4); and there was no schema requiring complete onboarding data — profileSchema makes every field optional, so completeOnboardingAction happily stamped onboarding_completed_at on an empty profile.
+
+import { z } from "zod";
+
+/**
+
+ * Rule: every Server Action begins with schema.safeParse().
+
+ * Client-side validation is UX only and is never trusted.
+
+ *
+
+ * Modernised for Zod v4: z.email() / z.url() / z.uuid() replace the
+
+ * deprecated z.string().email() chain form.
+
+ */
+
+const CEFR = z.enum(["A1", "A2", "B1", "B2", "C1", "C2"]);
+
+export const emailSchema = z
+
+  .string()
+
+  .trim()
+
+  .toLowerCase()
+
+  .max(254)
+
+  .pipe(z.email("بريد إلكتروني غير صالح"));
+
+export const passwordSchema = z
+
+  .string()
+
+  .min(8, "كلمة المرور 8 أحرف على الأقل")
+
+  .max(72, "كلمة المرور طويلة جداً")
+
+  .regex(/[A-Za-z]/, "يجب أن تحتوي على حرف واحد على الأقل")
+
+  .regex(/[0-9]/, "يجب أن تحتوي على رقم واحد على الأقل");
+
+export const nicknameSchema = z
+
+  .string()
+
+  .trim()
+
+  .min(2, "الاسم حرفان على الأقل")
+
+  .max(50, "الاسم 50 حرفاً كحد أقصى");
+
+// ── Account ────────────────────────────────────────────────────────────────
+
+export const signUpSchema = z.object({
+
+  email: emailSchema,
+
+  password: passwordSchema,
+
+  nickname: nicknameSchema,
+
+});
+
+export const signInSchema = z.object({
+
+  email: emailSchema,
+
+  password: z.string().min(1, "كلمة المرور مطلوبة").max(72),
+
+});
+
+export const requestPasswordResetSchema = z.object({ email: emailSchema });
+
+export const updatePasswordSchema = z
+
+  .object({ password: passwordSchema, confirm: z.string() })
+
+  .refine((v) => v.password === v.confirm, {
+
+    message: "كلمتا المرور غير متطابقتين",
+
+    path: ["confirm"],
+
+  });
+
+/** Partial edit from /profile and /settings. */
+
+export const profileSchema = z.object({
+
+  nickname: nicknameSchema.optional(),
+
+  country: z.string().trim().max(60).optional(),
+
+  native_language: z.string().trim().max(30).optional(),
+
+  english_level: CEFR.optional(),
+
+  avatar_url: z.url().max(500).optional(),
+
+  timezone: z.string().trim().max(60).optional(),
+
+});
+
+/**
+
+ * Finishing onboarding REQUIRES the full answer set.
+
+ *
+
+ * Before: completeOnboardingAction used profileSchema (all optional), so an
+
+ * empty payload still stamped onboarding_completed_at. The user then landed
+
+ * on a dashboard with a null english_level, which every stats read papered
+
+ * over with a fake "A1".
+
+ */
+
+export const completeOnboardingSchema = z.object({
+
+  nickname: nicknameSchema,
+
+  native_language: z.string().trim().min(2).max(30),
+
+  country: z.string().trim().min(2).max(60),
+
+  english_level: CEFR,
+
+});
+
+export const preferencesSchema = z.object({
+
+  voice_id: z.string().trim().max(80).optional(),
+
+  playback_speed: z.number().min(0.5).max(2).optional(),
+
+  daily_goal_xp: z.number().int().min(10).max(1000).optional(),
+
+  sound_enabled: z.boolean().optional(),
+
+  theme: z.enum(["light", "dark", "system"]).optional(),
+
+  email_notifications: z.boolean().optional(),
+
+});
+
+export const placementTestSchema = z.object({
+
+  answers: z
+
+    .array(z.object({ questionId: z.string().max(80), answer: z.string().max(500) }))
+
+    .max(100),
+
+  score: z.number().int().min(0).max(1000),
+
+  resulting_level: CEFR,
+
+});
+
+// ── Progress ───────────────────────────────────────────────────────────────
+
+export const lineAttemptSchema = z.object({
+
+  lineId: z.uuid(),
+
+  wpm: z.number().min(0).max(1000),
+
+  accuracy: z.number().min(0).max(100),
+
+  correctChars: z.number().int().min(0).max(5000),
+
+  incorrectChars: z.number().int().min(0).max(5000),
+
+  seconds: z.number().min(0.1).max(3600),
+
+});
+
+export const storyIdSchema = z.object({ storyId: z.uuid() });
+
+export const wordReviewSchema = z.object({
+
+  wordId: z.uuid(),
+
+  correct: z.boolean(),
+
+});
+
+export const wordByTextSchema = z.object({
+
+  word: z.string().trim().min(1).max(80),
+
+  partOfSpeech: z.string().trim().max(30).optional(),
+
+});
+
+export const vocabTestSchema = z.object({
+
+  categoryId: z.uuid(),
+
+  results: z.array(z.object({ wordId: z.uuid(), correct: z.boolean() })).min(1).max(200),
+
+});
+
+// ── localStorage migration ─────────────────────────────────────────────────
+
+export const importLocalProgressSchema = z.object({
+
+  xpTotal: z.number().int().min(0).max(1_000_000),
+
+  streakCount: z.number().int().min(0).max(3650),
+
+  level: CEFR.optional(),
+
+  completedStorySlugs: z.array(z.string().max(120)).max(500).default([]),
+
+  learnedWords: z.array(z.string().max(80)).max(5000).default([]),
+
+});
+
+// ── API route inputs ───────────────────────────────────────────────────────
+
+export const ttsRequestSchema = z.object({
+
+  text: z.string().trim().min(1).max(600, "النص أطول من الحد المسموح"),
+
+  voiceId: z.string().regex(/^[a-zA-Z0-9_-]{2,40}$/, "معرّف صوت غير مسموح"),
+
+});
+
+export const explainRequestSchema = z.object({
+
+  word: z.string().trim().min(1).max(80),
+
+  context: z.string().trim().max(600).optional(),
+
+});
+
+export type SignUpInput = z.infer<typeof signUpSchema>;
+
+export type SignInInput = z.infer<typeof signInSchema>;
+
+export type CompleteOnboardingInput = z.infer<typeof completeOnboardingSchema>;
+
+export type LineAttemptInput = z.infer<typeof lineAttemptSchema>;
+
+export type ImportLocalProgressInput = z.infer<typeof importLocalProgressSchema>;
+
+2.25 src/app/actions/auth.ts
+
+Root causes: signInAction returned nothing, forcing the client to guess the destination (Cause B); completeOnboardingAction used the all-optional schema and called refreshSession() (an extra token round-trip that is unnecessary once the claim is no longer authoritative, and which can silently fail); deleteAccountAction deleted the user and then tried to sign out with that dead user's session; requestPasswordResetAction skipped assertSameOrigin.
+
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { redirect } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+import { siteOrigin } from "@/lib/env/public";
+
+import {
+
+  HttpError,
+
+  requireUser,
+
+  assertSameOrigin,
+
+  enforceRateLimit,
+
+  clientIp,
+
+  RATE_LIMITS,
+
+} from "@/lib/auth/guards";
+
+import {
+
+  signUpSchema,
+
+  signInSchema,
+
+  requestPasswordResetSchema,
+
+  updatePasswordSchema,
+
+  profileSchema,
+
+  completeOnboardingSchema,
+
+  preferencesSchema,
+
+  placementTestSchema,
+
+} from "@/lib/validation/schemas";
+
+export type ActionResult<T = void> =
+
+  | { ok: true; data?: T }
+
+  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
+
+function fail(err: unknown): ActionResult<never> {
+
+  if (err instanceof HttpError) return { ok: false, error: err.message };
+
+  console.error("[action] unhandled", err);
+
+  return { ok: false, error: "حدث خطأ غير متوقع" };
+
+}
+
+// ── Sign up ────────────────────────────────────────────────────────────────
+
+export async function signUpAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const parsed = signUpSchema.safeParse(input);
+
+    if (!parsed.success) {
+
+      return {
+
+        ok: false,
+
+        error: "بيانات غير صالحة",
+
+        fieldErrors: parsed.error.flatten().fieldErrors,
+
+      };
+
+    }
+
+    await enforceRateLimit("signup", await clientIp(), RATE_LIMITS.signIn);
+
+    const supabase = await createClient();
+
+    const { error } = await supabase.auth.signUp({
+
+      email: parsed.data.email,
+
+      password: parsed.data.password,
+
+      options: {
+
+        data: { nickname: parsed.data.nickname },
+
+        emailRedirectTo: `${siteOrigin()}/auth/confirm?type=signup`,
+
+      },
+
+    });
+
+    // Uniform message: never disclose whether the address already exists.
+
+    if (error) {
+
+      console.error("[signup]", error.message);
+
+      return { ok: false, error: "تعذر إنشاء الحساب، تأكد من البيانات وحاول مرة أخرى" };
+
+    }
+
+    // profiles / user_preferences / user_stats rows are created by the
+
+    // on_auth_user_created trigger.
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+// ── Sign in ────────────────────────────────────────────────────────────────
+
+export type SignInResult = { redirectTo: string };
+
+/**
+
+ * Returns the destination computed ON THE SERVER.
+
+ *
+
+ * Before: the action returned void and the login page decided the route in
+
+ * the browser by checking four nullable profile columns. english_level is
+
+ * null for every account that has not finished the level step, so completed
+
+ * users were shipped straight to /onboarding/nickname. That was the bug.
+
+ *
+
+ * After: one flag, profiles.onboarding_completed_at, read server-side, using
+
+ * the exact same rule ProtectedShell enforces.
+
+ */
+
+export async function signInAction(input: unknown): Promise<ActionResult<SignInResult>> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const parsed = signInSchema.safeParse(input);
+
+    if (!parsed.success) return { ok: false, error: "بيانات غير صالحة" };
+
+    await enforceRateLimit("signin:email", parsed.data.email, RATE_LIMITS.signIn);
+
+    await enforceRateLimit("signin:ip", await clientIp(), RATE_LIMITS.signIn);
+
+    const supabase = await createClient();
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+
+      email: parsed.data.email,
+
+      password: parsed.data.password,
+
+    });
+
+    if (error || !data.user) {
+
+      return { ok: false, error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" };
+
+    }
+
+    const { data: profile } = await supabase
+
+      .from("profiles")
+
+      .select("onboarding_completed_at")
+
+      .eq("id", data.user.id)
+
+      .maybeSingle();
+
+    revalidatePath("/", "layout");
+
+    return {
+
+      ok: true,
+
+      data: { redirectTo: profile?.onboarding_completed_at ? "/dashboard" : "/onboarding" },
+
+    };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+// ── Sign out ───────────────────────────────────────────────────────────────
+
+export async function signOutAction(): Promise<never> {
+
+  const supabase = await createClient();
+
+  await supabase.auth.signOut({ scope: "global" });
+
+  revalidatePath("/", "layout");
+
+  redirect("/login");
+
+}
+
+// ── Password recovery ──────────────────────────────────────────────────────
+
+export async function requestPasswordResetAction(input: unknown): Promise<ActionResult> {
+
+  // Always the same answer, whatever happens — no account enumeration.
+
+  const uniform: ActionResult = { ok: true };
+
+  try {
+
+    await assertSameOrigin();
+
+    const parsed = requestPasswordResetSchema.safeParse(input);
+
+    if (!parsed.success) return uniform;
+
+    await enforceRateLimit("pwreset", parsed.data.email, RATE_LIMITS.passwordReset);
+
+    const supabase = await createClient();
+
+    await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+
+      redirectTo: `${siteOrigin()}/auth/confirm?type=recovery`,
+
+    });
+
+  } catch {
+
+    // Swallowed on purpose: any difference in behaviour leaks account existence.
+
+  }
+
+  return uniform;
+
+}
+
+export async function updatePasswordAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    await requireUser(); // the short-lived recovery session
+
+    const parsed = updatePasswordSchema.safeParse(input);
+
+    if (!parsed.success) {
+
+      return {
+
+        ok: false,
+
+        error: "بيانات غير صالحة",
+
+        fieldErrors: parsed.error.flatten().fieldErrors,
+
+      };
+
+    }
+
+    const supabase = await createClient();
+
+    const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
+
+    if (error) throw new HttpError(400, "تعذر تحديث كلمة المرور");
+
+    // Invalidate every OTHER session after a password change.
+
+    await supabase.auth.signOut({ scope: "others" });
+
+    revalidatePath("/", "layout");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+// ── Profile & settings ─────────────────────────────────────────────────────
+
+export async function updateProfileAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const user = await requireUser();
+
+    const parsed = profileSchema.safeParse(input);
+
+    if (!parsed.success) {
+
+      return {
+
+        ok: false,
+
+        error: "بيانات غير صالحة",
+
+        fieldErrors: parsed.error.flatten().fieldErrors,
+
+      };
+
+    }
+
+    const supabase = await createClient();
+
+    const { error } = await supabase.from("profiles").update(parsed.data).eq("id", user.id);
+
+    if (error) throw new HttpError(400, "تعذر حفظ البيانات");
+
+    revalidatePath("/profile");
+
+    revalidatePath("/", "layout");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+/**
+
+ * The ONLY writer of onboarding_completed_at — the flag every guard reads.
+
+ * It therefore demands the complete answer set.
+
+ */
+
+export async function completeOnboardingAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const user = await requireUser();
+
+    const parsed = completeOnboardingSchema.safeParse(input);
+
+    if (!parsed.success) {
+
+      return {
+
+        ok: false,
+
+        error: "بيانات التسجيل غير مكتملة",
+
+        fieldErrors: parsed.error.flatten().fieldErrors,
+
+      };
+
+    }
+
+    const supabase = await createClient();
+
+    const { error } = await supabase
+
+      .from("profiles")
+
+      .update({
+
+        nickname: parsed.data.nickname,
+
+        native_language: parsed.data.native_language,
+
+        country: parsed.data.country,
+
+        english_level: parsed.data.english_level,
+
+        onboarding_completed_at: new Date().toISOString(),
+
+      })
+
+      .eq("id", user.id);
+
+    if (error) throw new HttpError(400, "تعذر حفظ بيانات التسجيل");
+
+    // No refreshSession() needed: routing reads the profiles row directly, so
+
+    // there is no JWT claim to wait for and no stale-token window.
+
+    revalidatePath("/", "layout");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+export async function updatePreferencesAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const user = await requireUser();
+
+    const parsed = preferencesSchema.safeParse(input);
+
+    if (!parsed.success) return { ok: false, error: "إعدادات غير صالحة" };
+
+    const supabase = await createClient();
+
+    const { error } = await supabase
+
+      .from("user_preferences")
+
+      .upsert({ user_id: user.id, ...parsed.data }, { onConflict: "user_id" });
+
+    if (error) throw new HttpError(400, "تعذر حفظ الإعدادات");
+
+    revalidatePath("/settings");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+export async function savePlacementTestAction(input: unknown): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const user = await requireUser();
+
+    const parsed = placementTestSchema.safeParse(input);
+
+    if (!parsed.success) return { ok: false, error: "نتيجة اختبار غير صالحة" };
+
+    const supabase = await createClient();
+
+    const { error: insertError } = await supabase.from("placement_tests").insert({
+
+      user_id: user.id,
+
+      answers: parsed.data.answers,
+
+      score: parsed.data.score,
+
+      resulting_level: parsed.data.resulting_level,
+
+    });
+
+    if (insertError) throw new HttpError(400, "تعذر حفظ نتيجة الاختبار");
+
+    const { error: updateError } = await supabase
+
+      .from("profiles")
+
+      .update({ english_level: parsed.data.resulting_level })
+
+      .eq("id", user.id);
+
+    if (updateError) throw new HttpError(400, "تعذر تحديث مستواك");
+
+    revalidatePath("/dashboard");
+
+    revalidatePath("/", "layout");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+// ── Account deletion ───────────────────────────────────────────────────────
+
+/**
+
+ * Before: admin.deleteUser() ran first, then signOut() was attempted with the
+
+ * now-dead user's session — it fails, so the auth cookies stayed in the
+
+ * browser and the app rendered as a phantom logged-in user until the token
+
+ * expired.
+
+ * After: cookies are cleared locally FIRST, then the row is deleted (all
+
+ * tables cascade from auth.users).
+
+ */
+
+export async function deleteAccountAction(): Promise<ActionResult> {
+
+  try {
+
+    await assertSameOrigin();
+
+    const user = await requireUser();
+
+    const supabase = await createClient();
+
+    await supabase.auth.signOut({ scope: "global" });
+
+    const admin = createAdminClient();
+
+    const { error } = await admin.auth.admin.deleteUser(user.id);
+
+    if (error) throw new HttpError(400, "تعذر حذف الحساب، تواصل مع الدعم");
+
+    revalidatePath("/", "layout");
+
+    return { ok: true };
+
+  } catch (err) {
+
+    return fail(err);
+
+  }
+
+}
+
+2.26 src/app/(auth)/login/page.tsx — server shell
+
+Root cause (build): reading query params in a Client Component page. If you switch that window.location.search hack to the idiomatic useSearchParams(), next build fails with "useSearchParams() should be wrapped in a suspense boundary" during prerender. Splitting into a server page + Suspense + client form is the production-grade fix and removes the window access during the first paint (a hydration-mismatch source).
+
+import React, { Suspense } from "react";
+
+import type { Metadata } from "next";
+
+import { LoginForm } from "./login-form";
+
+export const metadata: Metadata = {
+
+  title: "تسجيل الدخول — WordFlow",
+
+  description: "سجّل دخولك لمتابعة رحلتك في تعلم الإنجليزية.",
+
+};
+
+/**
+
+ * Server shell.
+
+ *
+
+ * LoginForm reads ?next= and ?error= with useSearchParams(), which forces the
+
+ * subtree to be client-rendered. Without this Suspense boundary `next build`
+
+ * fails prerendering with:
+
+ *   "useSearchParams() should be wrapped in a suspense boundary at page /login"
+
+ */
+
+export default function LoginPage() {
+
+  return (
+
+    <Suspense
+
+      fallback={
+
+        <div
+
+          className="flex h-screen w-full items-center justify-center bg-[#030611] text-slate-400"
+
+          aria-busy="true"
+
+        >
+
+          جارٍ التحميل…
+
+        </div>
+
+      }
+
+    >
+
+      <LoginForm />
+
+    </Suspense>
+
+  );
+
+}
+
+2.27 NEW src/app/(auth)/login/login-form.tsx
+
+Root cause: the client decided the post-login route. It no longer does — it simply follows the server's redirectTo. Also: router.push + router.refresh raced (push starts navigating with a stale RSC cache); <img> replaced with next/image; the memoised browser client removes the duplicate refresh loop.
+
+"use client";
+
+import React, { useState } from "react";
+
+import Image from "next/image";
+
+import Link from "next/link";
+
+import { useRouter, useSearchParams } from "next/navigation";
+
+import { createClient } from "@/lib/supabase/client";
+
+import { signInAction } from "@/app/actions/auth";
+
+import {
+
+  Mail,
+
+  Lock,
+
+  Eye,
+
+  EyeOff,
+
+  ChevronRight,
+
+  ChevronDown,
+
+  Globe,
+
+  Brain,
+
+  Headphones,
+
+  BookOpen,
+
+  ShieldCheck,
+
+  AlertCircle,
+
+  Loader2,
+
+} from "lucide-react";
+
+const CALLBACK_ERRORS: Record<string, string> = {
+
+  missing_code: "رابط الدخول غير مكتمل، حاول مرة أخرى.",
+
+  oauth_failed: "تعذر إكمال تسجيل الدخول عبر المزود، حاول مرة أخرى.",
+
+  invalid_link: "الرابط غير صالح.",
+
+  expired_link: "انتهت صلاحية الرابط، اطلب رابطاً جديداً.",
+
+};
+
+function isInternalPath(value: string | null): value is string {
+
+  return Boolean(value && value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"));
+
+}
+
+export function LoginForm() {
+
+  const router = useRouter();
+
+  const searchParams = useSearchParams();
+
+  const [email, setEmail] = useState("");
+
+  const [password, setPassword] = useState("");
+
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(false);
+
+  // Read straight from the URL during render — no useEffect, no window access,
+
+  // no hydration mismatch.
+
+  const callbackErrorKey = searchParams.get("error");
+
+  const error =
+
+    formError ?? (callbackErrorKey ? (CALLBACK_ERRORS[callbackErrorKey] ?? null) : null);
+
+  const nextParam = searchParams.get("next");
+
+  /**
+
+   * The destination comes from the SERVER (signInAction), computed from
+
+   * profiles.onboarding_completed_at — the same flag ProtectedShell uses.
+
+   *
+
+   * The old version queried four nullable profile columns from the browser
+
+   * and pushed /onboarding/nickname whenever english_level was null, which is
+
+   * true for every account that never finished the level step. That is why
+
+   * "Login" always landed on the nickname screen.
+
+   */
+
+  const handleSubmit = async (e: React.FormEvent) => {
+
+    e.preventDefault();
+
+    setFormError(null);
+
+    if (!email.trim() || !password) {
+
+      setFormError("يرجى إدخال البريد الإلكتروني وكلمة المرور.");
+
+      return;
+
+    }
+
+    setLoading(true);
+
+    const result = await signInAction({ email: email.trim(), password });
+
+    if (!result.ok) {
+
+      setFormError(result.error);
+
+      setLoading(false);
+
+      return;
+
+    }
+
+    const serverTarget = result.data?.redirectTo ?? "/dashboard";
+
+    // ?next= only wins when onboarding is already complete.
+
+    const target = serverTarget === "/dashboard" && isInternalPath(nextParam) ? nextParam : serverTarget;
+
+    // refresh() BEFORE replace() so the new RSC payload is fetched with the
+
+    // fresh session cookie; replace() keeps /login out of the history stack.
+
+    router.refresh();
+
+    router.replace(target);
+
+  };
+
+  const handleOAuthLogin = async (provider: "google" | "github") => {
+
+    setFormError(null);
+
+    const supabase = createClient();
+
+    const redirectTo = new URL("/auth/callback", window.location.origin);
+
+    if (isInternalPath(nextParam)) redirectTo.searchParams.set("next", nextParam);
+
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+
+      provider,
+
+      options: { redirectTo: redirectTo.toString() },
+
+    });
+
+    if (oauthError) {
+
+      setFormError("تعذر بدء تسجيل الدخول عبر هذا المزود، حاول مرة أخرى.");
+
+    }
+
+  };
+
+  return (
+
+    <div
+
+      className="relative flex h-screen min-h-[850px] w-screen select-none flex-col justify-between overflow-hidden bg-[#030611] p-6 font-sans text-white lg:p-8"
+
+      dir="ltr"
+
+    >
+
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+
+        <Image
+
+          src="/images/login.png"
+
+          alt=""
+
+          fill
+
+          priority
+
+          sizes="100vw"
+
+          className="object-cover object-center brightness-90 contrast-105"
+
+        />
+
+        <div className="absolute inset-0 bg-black/30" />
+
+      </div>
+
+      <header className="relative z-20 flex justify-end">
+
+        <button
+
+          type="button"
+
+          className="flex items-center gap-2 rounded-full border border-white/10 bg-[#0d1322]/70 px-4 py-2 text-sm text-slate-200 shadow-sm backdrop-blur-md transition-colors hover:bg-[#151c2e]"
+
+          dir="rtl"
+
+        >
+
+          <Globe className="h-4 w-4 text-slate-300" aria-hidden />
+
+          <span>العربية</span>
+
+          <ChevronDown className="h-3.5 w-3.5 text-slate-400" aria-hidden />
+
+        </button>
+
+      </header>
+
+      <main className="relative z-10 mx-auto flex w-full max-w-[1500px] flex-1 flex-col justify-between py-2">
+
+        <div className="flex w-full flex-1 flex-row items-stretch justify-start gap-4 min-h-[680px]">
+
+          <div className="flex h-full w-[450px] shrink-0 flex-col">
+
+            <div className="flex h-full flex-col justify-between rounded-[28px] border border-white/10 bg-[#050914]/55 p-8 shadow-[0_0_35px_rgba(56,189,248,0.12)] backdrop-blur-2xl transition-all duration-300 hover:border-cyan-500/30">
+
+              <div>
+
+                <div className="mb-6 flex items-center gap-3.5">
+
+                  *
+
+              <span className="text-3xl font-extrabold tracking-tight text-white">
+
+                Word<span className="text-[#f43f5e]">Flow</span>
+
+              </span>
+
+            </div>
+
+            <div className="mb-6 text-left">
+
+              <h1 className="mb-1.5 flex items-center gap-2 bg-gradient-to-r from-[#38bdf8] via-[#a855f7] to-[#ec4899] bg-clip-text text-3xl font-black text-transparent">
+
+                Welcome Back <span className="text-2xl" aria-hidden>👋</span>
+
+              </h1>
+
+              <p className="text-left text-sm font-normal text-slate-300" dir="rtl">
+
+                أكمل رحلة تعلم الإنجليزية من حيث توقفت
+
+              </p>
+
+            </div>
+
+            {error && (
+
+              <div
+
+                role="alert"
+
+                className="mb-4 flex items-center justify-end gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400"
+
+                dir="rtl"
+
+              >
+
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+
+                <span>{error}</span>
+
+              </div>
+
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+
+              <div className="space-y-1.5">
+
+                <label
+
+                  htmlFor="login-email"
+
+                  className="block text-right text-sm font-semibold text-slate-200"
+
+                  dir="rtl"
+
+                >
+
+                  البريد الإلكتروني
+
+                </label>
+
+                <div className="relative flex items-center">
+
+                  <Mail className="pointer-events-none absolute left-3.5 h-5 w-5 text-slate-400" aria-hidden />
+
+                  <input
+
+                    id="login-email"
+
+                    name="email"
+
+                    type="email"
+
+                    autoComplete="email"
+
+                    required
+
+                    value={email}
+
+                    onChange={(e) => setEmail(e.target.value)}
+
+                    placeholder="example@email.com"
+
+                    className="w-full rounded-xl border border-white/10 bg-[#030712]/60 py-3 pl-11 pr-4 text-left text-sm text-white placeholder-slate-500 transition-all focus:border-cyan-500/60 focus:bg-[#030712]/80 focus:outline-none"
+
+                  />
+
+                </div>
+
+              </div>
+
+              <div className="space-y-1.5">
+
+                <label
+
+                  htmlFor="login-password"
+
+                  className="block text-right text-sm font-semibold text-slate-200"
+
+                  dir="rtl"
+
+                >
+
+                  كلمة المرور
+
+                </label>
+
+                <div className="relative flex items-center">
+
+                  <Lock className="pointer-events-none absolute left-3.5 h-5 w-5 text-slate-400" aria-hidden />
+
+                  <input
+
+                    id="login-password"
+
+                    name="password"
+
+                    type={showPassword ? "text" : "password"}
+
+                    autoComplete="current-password"
+
+                    required
+
+                    value={password}
+
+                    onChange={(e) => setPassword(e.target.value)}
+
+                    placeholder="••••••••••••"
+
+                    className="w-full rounded-xl border border-white/10 bg-[#030712]/60 py-3 pl-11 pr-11 text-left text-sm tracking-widest text-white placeholder-slate-500 transition-all focus:border-cyan-500/60 focus:bg-[#030712]/80 focus:outline-none"
+
+                  />
+
+                  <button
+
+                    type="button"
+
+                    onClick={() => setShowPassword((v) => !v)}
+
+                    aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+
+                    className="absolute right-3.5 text-slate-400 hover:text-slate-200"
+
+                  >
+
+                    {showPassword ? (
+
+                      <EyeOff className="h-5 w-5" aria-hidden />
+
+                    ) : (
+
+                      <Eye className="h-5 w-5" aria-hidden />
+
+                    )}
+
+                  </button>
+
+                </div>
+
+              </div>
+
+              <div className="flex flex-row-reverse items-center justify-between pt-1 text-sm">
+
+                <span className="text-slate-400 text-xs">
+
+                  جلستك تبقى نشطة على هذا الجهاز
+
+                </span>
+
+                <Link
+
+                  href="/forgot-password"
+
+                  className="text-[#a855f7] transition-colors hover:text-[#c084fc]"
+
+                >
+
+                  نسيت كلمة المرور؟
+
+                </Link>
+
+              </div>
+
+              <button
+
+                type="submit"
+
+                disabled={loading}
+
+                className="relative mt-2 flex w-full cursor-pointer items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 via-indigo-500 to-[#f43f5e] py-3.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all hover:opacity-95 disabled:opacity-60"
+
+              >
+
+                {loading ? (
+
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+
+                ) : (
+
+                  <span>تسجيل الدخول</span>
+
+                )}
+
+                <ChevronRight className="absolute right-4 h-5 w-5" aria-hidden />
+
+              </button>
+
+            </form>
+
+            <div className="relative my-4 text-center">
+
+              <div className="absolute inset-0 flex items-center">
+
+                <div className="w-full border-t border-white/10" />
+
+              </div>
+
+              <span className="relative rounded-full bg-[#070c18] px-3 text-xs text-slate-400">
+
+                أو
+
+              </span>
+
+            </div>
+
+            <div className="space-y-2.5">
+
+              <button
+
+                type="button"
+
+                onClick={() => void handleOAuthLogin("google")}
+
+                className="relative flex w-full cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-[#030712]/50 px-4 py-2.5 text-sm text-slate-200 transition-colors hover:bg-[#0c1222]"
+
+              >
+
+                
+
+                <span>متابعة باستخدام Google</span>
+
+                <ChevronRight className="absolute right-4 h-5 w-5 text-slate-500" aria-hidden />
+
+              </button>
+
+              <button
+
+                type="button"
+
+                onClick={() => void handleOAuthLogin("github")}
+
+                className="relative flex w-full cursor-pointer items-center justify-center rounded-xl border border-white/10 bg-[#030712]/50 px-4 py-2.5 text-sm text-slate-200 transition-colors hover:bg-[#0c1222]"
+
+              >
+
+                
+
+                <span>متابعة باستخدام GitHub</span>
+
+                <ChevronRight className="absolute right-4 h-5 w-5 text-slate-500" aria-hidden />
+
+              </button>
+
+            </div>
+
+          </div>
+
+          <div className="pt-3 text-center text-sm text-slate-300" dir="rtl">
+
+            ليس لديك حساب؟{" "}
+
+            <Link href="/register" className="font-bold text-[#a855f7] hover:underline">
+
+              إنشاء حساب جديد
+
+            </Link>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <div className="space-y-4 pt-4 text-right font-sans" dir="rtl">
+
+        <p className="flex items-center justify-start gap-2 text-lg font-medium text-slate-100">
+
+          <span>مرحباً بك مجدداً</span>
+
+          <span className="inline-block -rotate-12 text-2xl" aria-hidden>👋</span>
+
+        </p>
+
+        <h2 className="text-5xl font-black leading-[1.2] tracking-tight text-white lg:text-6xl">
+
+          اقرأ أكثر...
+
+          <br />
+
+          <span className="bg-gradient-to-r from-[#00d2ff] via-[#a855f7] to-[#e2e8f0] bg-clip-text text-transparent">
+
+            وتحدث بثقة.
+
+          </span>
+
+        </h2>
+
+        <p className="pt-1 text-base font-normal text-slate-300 opacity-90">
+
+          قصص ملهمة، تعلم ذكي، تقدم مستمر
+
+        </p>
+
+        <div className="mt-4 h-[3px] w-48 rounded-full bg-gradient-to-r from-[#00d2ff] via-[#a855f7] to-[#ec4899] shadow-[0_0_12px_rgba(0,210,255,0.4)]" />
+
+      </div>
+
+    </div>
+
+    <div className="ml-auto mr-[10%] mt-auto w-full max-w-[780px] pt-6">
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3" dir="ltr">
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-cyan-500/30">
+
+          <Brain className="mb-1.5 h-7 w-7 shrink-0 text-[#38bdf8]" aria-hidden />
+
+          <h2 className="mb-0.5 text-base font-bold text-white">AI Feedback</h2>
+
+          <p className="text-xs leading-snug text-slate-300" dir="rtl">
+
+            تغذية راجعة ذكية لتحسين كتابتك ونطقك
+
+          </p>
+
+        </div>
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-purple-500/30">
+
+          <Headphones className="mb-1.5 h-7 w-7 shrink-0 text-[#a855f7]" aria-hidden />
+
+          <h2 className="mb-0.5 text-base font-bold text-white">Native Audio</h2>
+
+          <p className="text-xs leading-snug text-slate-300" dir="rtl">
+
+            استمع للنطق الصحيح بجودة عالية
+
+          </p>
+
+        </div>
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-pink-500/30">
+
+          <BookOpen className="mb-1.5 h-7 w-7 shrink-0 text-[#f43f5e]" aria-hidden />
+
+          <h2 className="mb-0.5 text-base font-bold text-white">+500 Stories</h2>
+
+          <p className="text-xs leading-snug text-slate-300" dir="rtl">
+
+            مئات القصص في مختلف المستويات
+
+          </p>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer className="relative z-10 flex justify-center pb-1 pt-2" dir="rtl">
+
+    <div className="flex items-center gap-2 text-xs text-cyan-400">
+
+      <ShieldCheck className="h-4 w-4" aria-hidden />
+
+      <span>بياناتك آمنة معنا</span>
+
+    </div>
+
+  </footer>
+
+</div>
+
+); }
+
+> Note: I removed the "تذكرني" checkbox. It was wired to `rememberMe` state that was **never read** — a control that visibly does nothing is worse than no control. Supabase session lifetime is a project setting, not a per-request flag.
+
+## 2.28 `src/app/onboarding/level/page.tsx`
+
+Root causes: it read `sessionStorage` for nickname/language/country and **silently substituted `"ar"` / `"EG"` when the earlier steps were skipped** — so a user who deep-linked to `/onboarding/level` got a profile with fabricated data stamped as "complete". It also `push`ed to `/dashboard` before `refresh()`, racing the RSC cache against the just-written flag.
+
+```tsx
+
+"use client";
+
+import React, { useEffect, useState } from "react";
+
+import { useRouter } from "next/navigation";
+
+import { completeOnboardingAction } from "@/app/actions/auth";
+
+import { purgeLegacyStorage } from "@/lib/storage/legacyKeys";
+
+import type { CefrLevel } from "@/types/database";
+
+import {
+
+  Globe,
+
+  ChevronDown,
+
+  ChevronRight,
+
+  Brain,
+
+  Headphones,
+
+  BookOpen,
+
+  ShieldCheck,
+
+  Loader2,
+
+  BarChart3,
+
+  Sprout,
+
+  Trees,
+
+  Mountain,
+
+} from "lucide-react";
+
+interface LevelOption {
+
+  id: CefrLevel;
+
+  titleAr: string;
+
+  titleEn: string;
+
+  desc: string;
+
+  icon: React.ComponentType<{ className?: string }>;
+
+  iconBg: string;
+
+  iconColor: string;
+
+  activeBorder: string;
+
+  radioGlow: string;
+
+}
+
+const LEVELS: LevelOption[] = [
+
+  {
+
+    id: "A1",
+
+    titleAr: "مبتدئ",
+
+    titleEn: "Beginner",
+
+    desc: "للمبتدئين تماماً أو من لديهم معرفة بسيطة بالإنجليزي",
+
+    icon: Sprout,
+
+    iconBg: "bg-emerald-950/30 border-emerald-500/20",
+
+    iconColor: "text-emerald-400",
+
+    activeBorder: "border-[#a855f7]/80 shadow-[0_0_20px_rgba(168,85,247,0.2)]",
+
+    radioGlow: "border-[#00d2ff] bg-[#00d2ff] shadow-[0_0_10px_#00d2ff]",
+
+  },
+
+  {
+
+    id: "B1",
+
+    titleAr: "متوسط",
+
+    titleEn: "Intermediate",
+
+    desc: "لمن لديهم أساس جيد ويرغبون في تطوير مهاراتهم",
+
+    icon: Trees,
+
+    iconBg: "bg-cyan-950/30 border-cyan-500/20",
+
+    iconColor: "text-cyan-400",
+
+    activeBorder: "border-[#00d2ff]/80 shadow-[0_0_20px_rgba(0,210,255,0.2)]",
+
+    radioGlow: "border-[#00d2ff] bg-[#00d2ff] shadow-[0_0_10px_#00d2ff]",
+
+  },
+
+  {
+
+    id: "C1",
+
+    titleAr: "متقدم",
+
+    titleEn: "Advanced",
+
+    desc: "لمن لديهم مستوى عالٍ ويرغبون في إتقان اللغة",
+
+    icon: Mountain,
+
+    iconBg: "bg-purple-950/30 border-purple-500/20",
+
+    iconColor: "text-purple-400",
+
+    activeBorder: "border-[#f43f5e]/80 shadow-[0_0_20px_rgba(244,63,94,0.2)]",
+
+    radioGlow: "border-[#00d2ff] bg-[#00d2ff] shadow-[0_0_10px_#00d2ff]",
+
+  },
+
+];
+
+type DraftAnswers = {
+
+  nickname: string;
+
+  nativeLanguage: string;
+
+  country: string;
+
+};
+
+function readDraft(): DraftAnswers | null {
+
+  if (typeof window === "undefined") return null;
+
+  try {
+
+    const nickname = sessionStorage.getItem("onboarding_nickname")?.trim() ?? "";
+
+    const nativeLanguage = sessionStorage.getItem("onboarding_native_language")?.trim() ?? "";
+
+    const country = sessionStorage.getItem("onboarding_country")?.trim() ?? "";
+
+    if (!nickname || !nativeLanguage || !country) return null;
+
+    return { nickname, nativeLanguage, country };
+
+  } catch {
+
+    return null;
+
+  }
+
+}
+
+export default function OnboardingLevelPage() {
+
+  const router = useRouter();
+
+  const [selectedLevel, setSelectedLevel] = useState<CefrLevel>("A1");
+
+  const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+  /**
+
+   * Before: missing answers were silently replaced with "ar" / "EG", so a user
+
+   * who deep-linked here got a profile filled with invented data and stamped
+
+   * as complete. Now the funnel restarts at the first missing step.
+
+   */
+
+  useEffect(() => {
+
+    if (!readDraft()) router.replace("/onboarding");
+
+  }, [router]);
+
+  const handleFinish = async () => {
+
+    setLoading(true);
+
+    setError(null);
+
+    const draft = readDraft();
+
+    if (!draft) {
+
+      router.replace("/onboarding");
+
+      return;
+
+    }
+
+    const result = await completeOnboardingAction({
+
+      nickname: draft.nickname,
+
+      native_language: draft.nativeLanguage,
+
+      country: draft.country,
+
+      english_level: selectedLevel,
+
+    });
+
+    if (!result.ok) {
+
+      setError(result.error);
+
+      setLoading(false);
+
+      return;
+
+    }
+
+    try {
+
+      sessionStorage.removeItem("onboarding_nickname");
+
+      sessionStorage.removeItem("onboarding_native_language");
+
+      sessionStorage.removeItem("onboarding_country");
+
+    } catch {
+
+      // storage may be disabled — not fatal
+
+    }
+
+    purgeLegacyStorage();
+
+    // refresh() first so /dashboard renders against the freshly written flag,
+
+    // otherwise ProtectedShell can read a cached "not onboarded" tree and
+
+    // bounce straight back into onboarding.
+
+    router.refresh();
+
+    router.replace("/dashboard");
+
+  };
+
+  return (
+
+    <div
+
+      className="relative flex h-screen min-h-[850px] w-screen select-none flex-col justify-between overflow-hidden bg-[#030611] p-6 font-sans text-white lg:p-8"
+
+      dir="ltr"
+
+    >
+
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+
+        <img
+
+          src="/images/login.png"
+
+          alt=""
+
+          className="h-full w-full object-cover object-center brightness-90 contrast-105"
+
+        />
+
+        <div className="absolute inset-0 bg-black/40" />
+
+      </div>
+
+      <header className="relative z-20 flex justify-end">
+
+        <button
+
+          type="button"
+
+          className="flex cursor-pointer items-center gap-2 rounded-full border border-white/10 bg-[#0d1322]/70 px-4 py-2.5 text-sm text-slate-200 shadow-sm backdrop-blur-md transition-colors hover:bg-[#151c2e]"
+
+          dir="rtl"
+
+        >
+
+          <Globe className="h-4 w-4 text-slate-300" aria-hidden />
+
+          <span className="font-medium">العربية</span>
+
+          <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />
+
+        </button>
+
+      </header>
+
+      <main className="relative z-10 mx-auto flex w-full max-w-[1550px] flex-1 flex-col justify-between py-2">
+
+        <div className="flex w-full flex-1 flex-row items-center justify-start min-h-[580px]">
+
+          <div className="my-auto flex h-auto w-[440px] shrink-0 flex-col">
+
+            <div className="flex flex-col rounded-[28px] border border-white/10 bg-[#040711]/85 p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] backdrop-blur-2xl">
+
+              <div className="flex w-full flex-col items-center">
+
+                <div className="mb-6 flex items-center gap-3">
+
+                  *_
+
+              <span className="text-3xl font-bold tracking-tight text-white">
+
+                Word<span className="text-[#f43f5e]">Flow</span>
+
+              </span>
+
+            </div>
+
+            <div className="relative mb-8 flex w-48 items-center justify-between" aria-hidden>
+
+              <div className="absolute left-0 right-0 top-1/2 z-0 h-[2px] -translate-y-1/2 bg-slate-800" />
+
+              <div className="relative z-10 h-3 w-3 rounded-full bg-slate-700/80" />
+
+              <div className="relative z-10 h-3 w-3 rounded-full bg-slate-700/80" />
+
+              <div className="relative z-10 h-3 w-3 rounded-full bg-slate-700/80" />
+
+              <div className="relative z-10 h-3.5 w-3.5 rounded-full bg-[#00d2ff] shadow-[0_0_10px_#00d2ff]" />
+
+            </div>
+
+            <div className="mb-6 space-y-2 text-center" dir="rtl">
+
+              <h1 className="flex items-center justify-center gap-2.5 text-3xl font-extrabold text-white">
+
+                <span>اختر مستواك</span>
+
+                <BarChart3 className="h-7 w-7 text-purple-400" aria-hidden />
+
+              </h1>
+
+              <p className="text-xs font-normal text-slate-400">
+
+                اختر المستوى المناسب لك لبدء رحلتك في تعلم الإنجليزية
+
+              </p>
+
+            </div>
+
+            {error && (
+
+              <div
+
+                role="alert"
+
+                className="mb-4 w-full rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-center text-xs font-medium text-red-400"
+
+                dir="rtl"
+
+              >
+
+                {error}
+
+              </div>
+
+            )}
+
+            <div className="mb-6 w-full space-y-3" dir="ltr" role="radiogroup" aria-label="اختر مستواك">
+
+              {LEVELS.map((lvl) => {
+
+                const isSelected = selectedLevel === lvl.id;
+
+                const IconComponent = lvl.icon;
+
+                return (
+
+                  <button
+
+                    key={lvl.id}
+
+                    type="button"
+
+                    role="radio"
+
+                    aria-checked={isSelected}
+
+                    onClick={() => setSelectedLevel(lvl.id)}
+
+                    className={`relative flex w-full cursor-pointer items-center justify-between overflow-hidden rounded-2xl border p-4 transition-all duration-300 ${
+
+                      isSelected
+
+                        ? `bg-[#080d1e]/90 ${lvl.activeBorder}`
+
+                        : "border-slate-800/80 bg-[#060a17]/60 hover:border-slate-700 hover:bg-[#080e21]/80"
+
+                    }`}
+
+                  >
+
+                    <div className="z-10 flex items-start gap-3.5 text-left">
+
+                      <div
+
+                        aria-hidden
+
+                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+
+                          isSelected ? lvl.radioGlow : "border-slate-600 bg-transparent"
+
+                        }`}
+
+                      >
+
+                        {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-slate-950" />}
+
+                      </div>
+
+                      <div className="flex flex-col text-right" dir="rtl">
+
+                        <span className="text-sm font-bold leading-snug text-white">{lvl.titleAr}</span>
+
+                        <span className="mb-1 text-[11px] font-medium text-slate-400" dir="ltr">
+
+                          {lvl.titleEn}
+
+                        </span>
+
+                        <span className="text-[10px] leading-tight text-slate-400">{lvl.desc}</span>
+
+                      </div>
+
+                    </div>
+
+                    <div
+
+                      className={`ml-3 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border backdrop-blur-sm ${lvl.iconBg}`}
+
+                    >
+
+                      <IconComponent className={`h-5 w-5 stroke-[1.75] ${lvl.iconColor}`} />
+
+                    </div>
+
+                  </button>
+
+                );
+
+              })}
+
+            </div>
+
+            <button
+
+              type="button"
+
+              disabled={loading}
+
+              onClick={() => void handleFinish()}
+
+              className="relative flex w-full cursor-pointer items-center justify-center rounded-xl bg-gradient-to-r from-[#00d2ff] via-[#7c3aed] to-[#f43f5e] py-3.5 text-base font-bold text-white shadow-lg shadow-purple-900/20 transition-all hover:opacity-95 disabled:opacity-60"
+
+              dir="rtl"
+
+            >
+
+              {loading ? (
+
+                <Loader2 className="h-5 w-5 animate-spin text-white" aria-hidden />
+
+              ) : (
+
+                <>
+
+                  <span>التالي</span>
+
+                  <ChevronRight className="absolute right-4 h-5 w-5" aria-hidden />
+
+                </>
+
+              )}
+
+            </button>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+    <div className="ml-auto mr-[10%] mt-auto w-full max-w-[850px] pt-4">
+
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-3" dir="ltr">
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-cyan-500/30">
+
+          <Brain className="mb-1.5 h-7 w-7 shrink-0 text-[#38bdf8]" aria-hidden />
+
+          <h2 className="mb-1 text-sm font-bold text-white">AI Feedback</h2>
+
+          <p className="text-[11px] leading-snug text-slate-300" dir="rtl">
+
+            تغذية راجعة ذكية لتحسين كتابتك ونطقك
+
+          </p>
+
+        </div>
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-purple-500/30">
+
+          <Headphones className="mb-1.5 h-7 w-7 shrink-0 text-[#a855f7]" aria-hidden />
+
+          <h2 className="mb-1 text-sm font-bold text-white">Native Audio</h2>
+
+          <p className="text-[11px] leading-snug text-slate-300" dir="rtl">
+
+            استمع للنطق الصحيح بجودة عالية
+
+          </p>
+
+        </div>
+
+        <div className="flex h-[130px] flex-col items-center justify-center rounded-2xl border border-white/10 bg-[#070c1a]/50 p-4 text-center backdrop-blur-md transition-all hover:border-pink-500/30">
+
+          <BookOpen className="mb-1.5 h-7 w-7 shrink-0 text-[#f43f5e]" aria-hidden />
+
+          <h2 className="mb-1 text-sm font-bold text-white">+500 Stories</h2>
+
+          <p className="text-[11px] leading-snug text-slate-300" dir="rtl">
+
+            مئات القصص في مختلف المستويات
+
+          </p>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer className="relative z-10 flex justify-center pb-1 pt-2" dir="rtl">
+
+    <div className="flex items-center gap-2 text-xs font-medium text-cyan-400 sm:text-sm">
+
+      <ShieldCheck className="h-4 w-4" aria-hidden />
+
+      <span>بياناتك آمنة معنا</span>
+
+    </div>
+
+  </footer>
+
+</div>
+
+); }
+
+## 2.29 `src/app/(auth)/reset-password/page.tsx`
+
+Root causes: styled for a light theme inside a dark-only app (`text-slate-900` on `#05070e` — effectively invisible); no verification that a recovery session actually exists, so a stranger could open the page and get a confusing 401; `router.replace("/dashboard")` after a password change now correctly re-gates through onboarding.
+
+```tsx
+
+import React from "react";
+
+import type { Metadata } from "next";
+
+import { redirect } from "next/navigation";
+
+import { getSessionContext } from "@/lib/auth/session";
+
+import { ResetPasswordForm } from "./reset-password-form";
+
+export const metadata: Metadata = {
+
+  title: "كلمة مرور جديدة — WordFlow",
+
+};
+
+/**
+
+ * Reached from /auth/confirm after verifyOtp({ type: "recovery" }).
+
+ *
+
+ * The recovery session is a real session, so we can verify it server-side and
+
+ * send strangers back to /forgot-password instead of rendering a form that is
+
+ * guaranteed to 401 on submit.
+
+ */
+
+export default async function ResetPasswordPage() {
+
+  const { user } = await getSessionContext();
+
+  if (!user) redirect("/forgot-password?error=expired_link");
+
+  return <ResetPasswordForm />;
+
+}
+
+2.30 NEW src/app/(auth)/reset-password/reset-password-form.tsx
+
+"use client";
+
+import React, { useState, useTransition } from "react";
+
+import { useRouter } from "next/navigation";
+
+import { updatePasswordAction } from "@/app/actions/auth";
+
+export function ResetPasswordForm() {
+
+  const router = useRouter();
+
+  const [password, setPassword] = useState("");
+
+  const [confirm, setConfirm] = useState("");
+
+  const [error, setError] = useState<string | null>(null);
+
+  const [pending, startTransition] = useTransition();
+
+  function onSubmit(e: React.FormEvent) {
+
+    e.preventDefault();
+
+    setError(null);
+
+    startTransition(async () => {
+
+      const result = await updatePasswordAction({ password, confirm });
+
+      if (!result.ok) {
+
+        setError(result.error);
+
+        return;
+
+      }
+
+      router.refresh();
+
+      router.replace("/dashboard");
+
+    });
+
+  }
+
+  return (
+
+    <main
+
+      dir="rtl"
+
+      className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center bg-background px-6"
+
+    >
+
+      <h1 className="text-2xl font-bold text-foreground">كلمة مرور جديدة</h1>
+
+      <p className="mt-2 text-sm text-muted-foreground">
+
+        8 أحرف على الأقل، وتحتوي على حرف ورقم.
+
+      </p>
+
+      <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
+
+        <div>
+
+          <label htmlFor="password" className="block text-sm font-medium text-foreground">
+
+            كلمة المرور الجديدة
+
+          </label>
+
+          <input
+
+            id="password"
+
+            name="new-password"
+
+            type="password"
+
+            autoComplete="new-password"
+
+            required
+
+            dir="ltr"
+
+            value={password}
+
+            onChange={(e) => setPassword(e.target.value)}
+
+            className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-left text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+
+          />
+
+        </div>
+
+        <div>
+
+          <label htmlFor="confirm" className="block text-sm font-medium text-foreground">
+
+            تأكيد كلمة المرور
+
+          </label>
+
+          <input
+
+            id="confirm"
+
+            name="confirm-password"
+
+            type="password"
+
+            autoComplete="new-password"
+
+            required
+
+            dir="ltr"
+
+            value={confirm}
+
+            onChange={(e) => setConfirm(e.target.value)}
+
+            className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-left text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+
+          />
+
+        </div>
+
+        {error && (
+
+          <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+
+            {error}
+
+          </p>
+
+        )}
+
+        <button
+
+          type="submit"
+
+          disabled={pending}
+
+          className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+
+        >
+
+          {pending ? "جارٍ الحفظ..." : "حفظ كلمة المرور"}
+
+        </button>
+
+      </form>
+
+    </main>
+
+  );
+
+}
+
+2.31 src/app/(auth)/forgot-password/page.tsx
+
+Root cause: same light-on-dark invisibility; and the success state had no focus management for screen readers.
+
+"use client";
+
+import React, { useState, useTransition } from "react";
+
+import Link from "next/link";
+
+import { requestPasswordResetAction } from "@/app/actions/auth";
+
+/**
+
+ * The response is identical whether or not the address exists — no account
+
+ * enumeration.
+
+ */
+
+export default function ForgotPasswordPage() {
+
+  const [email, setEmail] = useState("");
+
+  const [sent, setSent] = useState(false);
+
+  const [pending, startTransition] = useTransition();
+
+  function onSubmit(e: React.FormEvent) {
+
+    e.preventDefault();
+
+    startTransition(async () => {
+
+      await requestPasswordResetAction({ email });
+
+      setSent(true);
+
+    });
+
+  }
+
+  return (
+
+    <main
+
+      dir="rtl"
+
+      className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center bg-background px-6"
+
+    >
+
+      <h1 className="text-2xl font-bold text-foreground">استعادة كلمة المرور</h1>
+
+      {sent ? (
+
+        <div
+
+          role="status"
+
+          aria-live="polite"
+
+          className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300"
+
+        >
+
+          لو كان هذا البريد مسجّلاً عندنا، هتلاقي رسالة فيها رابط إعادة تعيين كلمة المرور خلال دقائق.
+
+          راجع مجلد الرسائل غير المرغوب فيها لو ما وصلتش.
+
+        </div>
+
+      ) : (
+
+        <>
+
+          <p className="mt-2 text-sm text-muted-foreground">
+
+            اكتب بريدك الإلكتروني وهنبعتلك رابطاً لتعيين كلمة مرور جديدة.
+
+          </p>
+
+          <form onSubmit={onSubmit} className="mt-6 space-y-4" noValidate>
+
+            <div>
+
+              <label htmlFor="email" className="block text-sm font-medium text-foreground">
+
+                البريد الإلكتروني
+
+              </label>
+
+              <input
+
+                id="email"
+
+                name="email"
+
+                type="email"
+
+                autoComplete="email"
+
+                required
+
+                dir="ltr"
+
+                value={email}
+
+                onChange={(e) => setEmail(e.target.value)}
+
+                className="mt-1 w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-left text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+
+              />
+
+            </div>
+
+            <button
+
+              type="submit"
+
+              disabled={pending}
+
+              className="w-full rounded-lg bg-primary px-4 py-2.5 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+
+            >
+
+              {pending ? "جارٍ الإرسال..." : "إرسال الرابط"}
+
+            </button>
+
+          </form>
+
+        </>
+
+      )}
+
+      <Link
+
+        href="/login"
+
+        className="mt-6 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+
+      >
+
+        الرجوع لتسجيل الدخول
+
+      </Link>
+
+    </main>
+
+  );
+
+}
+
+2.32 src/app/api/ai/explain/route.ts
+
+Root causes: serverEnv() demanded SUPABASE_SERVICE_ROLE_KEY and GEMINI_API_KEY together, so a missing Gemini key broke the shared env cache used by auth; JSON.parse(text) on unvalidated model output throws a raw 500; the Gemini key travelled in the query string (logged by proxies) instead of a header; no timeout, so a hung upstream pins a serverless function until it is killed.
+
+import type { NextRequest } from "next/server";
+
+import {
+
+  requireUser,
+
+  enforceRateLimit,
+
+  toResponse,
+
+  RATE_LIMITS,
+
+  HttpError,
+
+} from "@/lib/auth/guards";
+
+import { explainRequestSchema } from "@/lib/validation/schemas";
+
+import { geminiEnv } from "@/lib/env/server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const dynamic = "force-dynamic";
+
+export const runtime = "nodejs";
+
+const GEMINI_ENDPOINT =
+
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+
+const UPSTREAM_TIMEOUT_MS = 20_000;
+
+export async function POST(request: NextRequest) {
+
+  try {
+
+    const user = await requireUser();
+
+    await enforceRateLimit("ai:explain", user.id, RATE_LIMITS.aiExplain);
+
+    const body = await request.json().catch(() => null);
+
+    const parsed = explainRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+
+      throw new HttpError(400, parsed.error.issues[0]?.message ?? "طلب غير صالح");
+
+    }
+
+    const env = geminiEnv();
+
+    const prompt = [
+
+      "أنت معلم لغة إنجليزية يشرح لمتعلم عربي.",
+
+      `اشرح الكلمة: "${parsed.data.word}"`,
+
+      parsed.data.context ? `في سياق الجملة: "${parsed.data.context}"` : "",
+
+      "أعد JSON فقط بالمفاتيح: meaning_ar, part_of_speech, example_en, example_ar.",
+
+    ]
+
+      .filter(Boolean)
+
+      .join("\n");
+
+    const upstream = await fetch(GEMINI_ENDPOINT, {
+
+      method: "POST",
+
+      headers: {
+
+        "Content-Type": "application/json",
+
+        // Header, not ?key= — query strings end up in proxy and CDN logs.
+
+        "x-goog-api-key": env.GEMINI_API_KEY,
+
+      },
+
+      body: JSON.stringify({
+
+        contents: [{ parts: [{ text: prompt }] }],
+
+        generationConfig: { temperature: 0.2, responseMimeType: "application/json" },
+
+      }),
+
+      cache: "no-store",
+
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+
+    }).catch(() => null);
+
+    if (!upstream || !upstream.ok) {
+
+      throw new HttpError(502, "تعذر جلب الشرح الآن");
+
+    }
+
+    const json: unknown = await upstream.json().catch(() => null);
+
+    const candidate = json as
+
+      | {
+
+          candidates?: { content?: { parts?: { text?: string }[] } }[];
+
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+
+        }
+
+      | null;
+
+    const text = candidate?.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+
+    let explanation: unknown;
+
+    try {
+
+      explanation = JSON.parse(text);
+
+    } catch {
+
+      // The model can return prose despite responseMimeType. A raw throw here
+
+      // used to surface as an opaque 500.
+
+      throw new HttpError(502, "تعذر قراءة الشرح، حاول مرة أخرى");
+
+    }
+
+    void createAdminClient()
+
+      .from("ai_usage_log")
+
+      .insert({
+
+        user_id: user.id,
+
+        route: "/api/ai/explain",
+
+        prompt_tokens: candidate?.usageMetadata?.promptTokenCount ?? 0,
+
+        output_tokens: candidate?.usageMetadata?.candidatesTokenCount ?? 0,
+
+      })
+
+      .then(() => undefined);
+
+    return Response.json(explanation, {
+
+      headers: { "Cache-Control": "private, max-age=86400" },
+
+    });
+
+  } catch (err) {
+
+    return toResponse(err);
+
+  }
+
+}
+
+2.33 src/app/api/tts/route.ts
+
+Root causes: same coupled-env problem; no upstream timeout; new URL("/v1/audio/speech", env.KOKORO_API_URL) silently discards any base path in the configured URL.
+
+import type { NextRequest } from "next/server";
+
+import {
+
+  requireUser,
+
+  enforceRateLimit,
+
+  toResponse,
+
+  RATE_LIMITS,
+
+  HttpError,
+
+} from "@/lib/auth/guards";
+
+import { ttsRequestSchema } from "@/lib/validation/schemas";
+
+import { speechEnv } from "@/lib/env/server";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const dynamic = "force-dynamic";
+
+export const runtime = "nodejs";
+
+const ALLOWED_VOICES = new Set([
+
+  "af_heart",
+
+  "af_bella",
+
+  "am_michael",
+
+  "bf_emma",
+
+  "bm_george",
+
+]);
+
+const UPSTREAM_TIMEOUT_MS = 30_000;
+
+/** Preserves any base path configured in KOKORO_API_URL. */
+
+function speechEndpoint(base: string): string {
+
+  return `${base.replace(/\/+$/, "")}/v1/audio/speech`;
+
+}
+
+export async function POST(request: NextRequest) {
+
+  try {
+
+    const user = await requireUser();
+
+    await enforceRateLimit("tts", user.id, RATE_LIMITS.tts);
+
+    const body = await request.json().catch(() => null);
+
+    const parsed = ttsRequestSchema.safeParse(body);
+
+    if (!parsed.success) {
+
+      throw new HttpError(400, parsed.error.issues[0]?.message ?? "طلب غير صالح");
+
+    }
+
+    if (!ALLOWED_VOICES.has(parsed.data.voiceId)) {
+
+      throw new HttpError(400, "الصوت المطلوب غير مسموح");
+
+    }
+
+    const env = speechEnv();
+
+    if (!env.KOKORO_API_URL) throw new HttpError(503, "خدمة الصوت غير مهيأة");
+
+    const upstream = await fetch(speechEndpoint(env.KOKORO_API_URL), {
+
+      method: "POST",
+
+      headers: { "Content-Type": "application/json" },
+
+      body: JSON.stringify({
+
+        input: parsed.data.text,
+
+        voice: parsed.data.voiceId,
+
+        response_format: "mp3",
+
+      }),
+
+      cache: "no-store",
+
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+
+    }).catch(() => null);
+
+    if (!upstream || !upstream.ok || !upstream.body) {
+
+      throw new HttpError(502, "تعذر توليد الصوت");
+
+    }
+
+    void createAdminClient()
+
+      .from("ai_usage_log")
+
+      .insert({
+
+        user_id: user.id,
+
+        route: "/api/tts",
+
+        prompt_tokens: parsed.data.text.length,
+
+      })
+
+      .then(() => undefined);
+
+    return new Response(upstream.body, {
+
+      headers: {
+
+        "Content-Type": "audio/mpeg",
+
+        "Cache-Control": "private, max-age=3600",
+
+      },
+
+    });
+
+  } catch (err) {
+
+    return toResponse(err);
+
+  }
+
+}
+
+2.34 src/app/layout.tsx
+
+Root causes: six next/font/google families (12 network-blocking font files) with no preload control — a large, avoidable LCP hit; no metadataBase, so Next warns at build and social cards resolve relatively; hardcoded bg-[#03050b] disagreed with --background (#05070e), producing a visible seam.
+
+import type { Metadata, Viewport } from "next";
+
+import {
+
+  Inter,
+
+  Outfit,
+
+  Readex_Pro,
+
+  IBM_Plex_Sans_Arabic,
+
+  Cairo,
+
+  Plus_Jakarta_Sans,
+
+} from "next/font/google";
+
+import { Analytics } from "@vercel/analytics/next";
+
+import "./globals.css";
+
+/**
+
+ * Six families is a lot. Only the two families actually used for body copy
+
+ * (Readex Pro for Arabic, Outfit for Latin) are preloaded; the rest are
+
+ * loaded lazily when a component references their CSS variable.
+
+ */
+
+const inter = Inter({
+
+  subsets: ["latin"],
+
+  variable: "--font-inter",
+
+  display: "swap",
+
+  preload: false,
+
+});
+
+const outfit = Outfit({
+
+  subsets: ["latin"],
+
+  variable: "--font-outfit",
+
+  display: "swap",
+
+});
+
+const readexPro = Readex_Pro({
+
+  subsets: ["arabic"],
+
+  weight: ["300", "400", "500", "600", "700"],
+
+  variable: "--font-readex-pro",
+
+  display: "swap",
+
+});
+
+const ibmPlexArabic = IBM_Plex_Sans_Arabic({
+
+  subsets: ["arabic"],
+
+  weight: ["400", "600", "700"],
+
+  variable: "--font-ibm-plex-arabic",
+
+  display: "swap",
+
+  preload: false,
+
+});
+
+const cairo = Cairo({
+
+  subsets: ["arabic"],
+
+  weight: ["400", "600", "700", "800"],
+
+  variable: "--font-cairo",
+
+  display: "swap",
+
+  preload: false,
+
+});
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+
+  subsets: ["latin"],
+
+  weight: ["400", "600", "700", "800"],
+
+  variable: "--font-plus-jakarta",
+
+  display: "swap",
+
+  preload: false,
+
+});
+
+const siteUrl =
+
+  process.env.NEXT_PUBLIC_SITE_URL ??
+
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+
+    : "http://localhost:3000");
+
+export const metadata: Metadata = {
+
+  metadataBase: new URL(siteUrl),
+
+  title: {
+
+    default: "WordFlow — تعلم الإنجليزية سطرًا بسطر",
+
+    template: "%s",
+
+  },
+
+  description: "منصة تعلم الإنجليزية التفاعلية الرائدة.",
+
+  openGraph: {
+
+    type: "website",
+
+    locale: "ar_EG",
+
+    siteName: "WordFlow",
+
+    title: "WordFlow — تعلم الإنجليزية سطرًا بسطر",
+
+    description: "منصة تعلم الإنجليزية التفاعلية الرائدة.",
+
+  },
+
+};
+
+export const viewport: Viewport = {
+
+  themeColor: "#05070e",
+
+  colorScheme: "dark",
+
+  width: "device-width",
+
+  initialScale: 1,
+
+};
+
+export default function RootLayout({
+
+  children,
+
+}: Readonly<{ children: React.ReactNode }>) {
+
+  return (
+
+    <html
+
+      lang="ar"
+
+      dir="rtl"
+
+      className={`${inter.variable} ${outfit.variable} ${readexPro.variable} ${ibmPlexArabic.variable} ${cairo.variable} ${plusJakartaSans.variable}`}
+
+      suppressHydrationWarning
+
+    >
+
+      <body className="bg-background font-cairo text-foreground antialiased">
+
+        {children}
+
+        <Analytics />
+
+      </body>
+
+    </html>
+
+  );
+
+}
+
+2.35 NEW supabase/migrations/0006_onboarding_source_of_truth.sql
+
+Root cause: even with perfect code, every existing row has onboarding_completed_at IS NULL, so those users would still be pulled into onboarding on their next login. The flag must be backfilled.
+
+-- WordFlow · 0006 · onboarding is one flag, and it is backfilled
+
+-- ---------------------------------------------------------------------------
+
+-- Root cause this migration closes:
+
+--   Routing used to depend on auth.users.raw_app_meta_data ->> 'onboarding_completed',
+
+--   a claim written ONLY by sync_onboarding_claim(), which fires ONLY when
+
+--   profiles.onboarding_completed_at transitions NULL -> NOT NULL, which is
+
+--   written ONLY by completeOnboardingAction. Every account created before
+
+--   that action existed therefore read as "never onboarded" forever and was
+
+--   redirected to /onboarding/nickname on every protected route.
+
+--
+
+--   The application now reads profiles.onboarding_completed_at directly, so
+
+--   the claim is advisory only. This migration backfills the column for users
+
+--   who demonstrably already finished onboarding.
+
+-- ---------------------------------------------------------------------------
+
+-- 1) Backfill: anyone with a nickname AND a chosen level has finished.
+
+update public.profiles p
+
+   set onboarding_completed_at = coalesce(p.created_at, now())
+
+ where p.onboarding_completed_at is null
+
+   and p.nickname is not null
+
+   and btrim(p.nickname) <> ''
+
+   and p.english_level is not null;
+
+-- 2) Anyone who ever took a placement test has finished.
+
+update public.profiles p
+
+   set onboarding_completed_at = coalesce(t.taken_at, p.created_at, now())
+
+  from (
+
+    select user_id, min(taken_at) as taken_at
+
+      from public.placement_tests
+
+     group by user_id
+
+  ) t
+
+ where p.id = t.user_id
+
+   and p.onboarding_completed_at is null
+
+   and p.nickname is not null
+
+   and btrim(p.nickname) <> '';
+
+-- 3) The routing gate is a hot predicate — index it.
+
+create index if not exists profiles_onboarding_completed_at_idx
+
+  on public.profiles (id)
+
+  where onboarding_completed_at is not null;
+
+-- 4) Keep the JWT claim in sync in BOTH directions, and on INSERT too, so a
+
+--    row seeded as already-complete does not get a stale claim.
+
+create or replace function public.sync_onboarding_claim()
+
+returns trigger
+
+language plpgsql
+
+security definer
+
+set search_path = public
+
+as $$
+
+declare
+
+  v_completed boolean := new.onboarding_completed_at is not null;
+
+begin
+
+  if tg_op = 'UPDATE'
+
+     and (old.onboarding_completed_at is not null) = v_completed then
+
+    return new;
+
+  end if;
+
+  update auth.users
+
+     set raw_app_meta_data =
+
+         coalesce(raw_app_meta_data, '{}'::jsonb)
+
+         || jsonb_build_object('onboarding_completed', v_completed)
+
+   where id = new.id;
+
+  return new;
+
+end;
+
+$$;
+
+drop trigger if exists sync_onboarding_claim on public.profiles;
+
+create trigger sync_onboarding_claim
+
+  after insert or update of onboarding_completed_at on public.profiles
+
+  for each row execute function public.sync_onboarding_claim();
+
+-- 5) Re-sync the claim for every backfilled row.
+
+update auth.users u
+
+   set raw_app_meta_data =
+
+       coalesce(u.raw_app_meta_data, '{}'::jsonb)
+
+       || jsonb_build_object('onboarding_completed', p.onboarding_completed_at is not null)
+
+  from public.profiles p
+
+ where p.id = u.id;
+
+2.36 NEW .env.example
+
+Root cause: there was no documented contract for the variables env.ts hard-requires, so a fresh clone fails at runtime with no guidance.
+
+# ── Public (inlined into the browser bundle — nothing secret here) ──────────
+
+NEXT_PUBLIC_SUPABASE_URL="https://<project-ref>.supabase.co"
+
+NEXT_PUBLIC_SUPABASE_ANON_KEY="<anon-key>"
+
+# Canonical origin. Used for OAuth redirects, email links and CSRF checks.
+
+# On Vercel this falls back to VERCEL_PROJECT_PRODUCTION_URL / VERCEL_URL,
+
+# so it is only strictly required for self-hosting.
+
+NEXT_PUBLIC_SITE_URL="http://localhost:3000"
+
+# ── Server only — NEVER prefix these with NEXT_PUBLIC_ ─────────────────────
+
+SUPABASE_SERVICE_ROLE_KEY="<service-role-key>"
+
+# Required only by /api/ai/explain
+
+GEMINI_API_KEY="<gemini-key>"
+
+# Optional — /api/tts returns 503 when unset
+
+KOKORO_API_URL="https://<kokoro-host>"
+
+ELEVENLABS_API_KEY=""
+
+PART 3 — SECOND-PASS AUDIT (post-fix)
+
+Things I found on the re-read that are not fixed by the files above, ordered by risk. These need a decision from you rather than a blind rewrite.
+
+1. src/types/database.ts is a structural stub. Every table is Record<string, any>. That is why stats.ts is full of data?.english_level as CefrLevel | undefined casts — the compiler is verifying nothing on any query in the app. Fix:
+
+npx supabase gen types typescript --project-id <ref> --schema public > src/types/database.ts
+
+Then delete the /* eslint-disable @typescript-eslint/no-explicit-any */ at the top and let tsc show you the ~20 places where a column name or nullability is wrong. This is the single highest-value remaining action.
+
+2. check_rate_limit return type is declared wrong. database.ts says Returns: boolean; guards.ts (old version) read data[0].allowed and data[0].retry_after_seconds. One of them is lying. My replacement handles both shapes defensively, but confirm the SQL signature in 0005 and pin the type.
+
+3. enforceRateLimit uses the service-role client on the sign-in path. That is correct (an unauthenticated user can't write rate_limits under RLS), but it means every failed login opens a service-role connection. Confirm rate_limits has an index on the key column, or a credential-stuffing attempt becomes a DoS on your own database.
+
+4. next-env.d.ts and tsconfig.tsbuildinfo are committed. tsconfig.tsbuildinfo is 192 KB of build cache in git — add it to .gitignore and git rm --cached it. Stale tsbuildinfo across machines causes "it typechecks for me" divergence.
+
+5. tsconfig.json "target": "ES6". With React 19 / Node 20+ this needlessly down-levels async/await and spread into generator polyfills, inflating the bundle. Set "target": "ES2022". I left it alone because changing it can surface latent Symbol.asyncIterator issues in your audio code — change it and run pnpm typecheck deliberately.
+
+6. src/app/onboarding/{nickname,language,country}/page.tsx persist to sessionStorage. Nothing is written to the database until the final step, so a refresh mid-funnel on a locked-down browser loses everything, and the level step now (correctly) kicks the user back to step 1. If drop-off matters, write each answer to profiles as it is given and keep onboarding_completed_at as the terminal flag. The server action for that is a five-line variant of updateProfileAction.
+
+7. useProfileSummary, useUserStats, useLearnedWords call server actions from useEffect. Every dashboard card fetches independently after hydration — a waterfall of round-trips and a guaranteed layout shift. Since getSessionContext() is cache()d, the parent server components can read this data directly and pass it as props. That is the biggest remaining performance win.
+
+8. Landing page CTAs point at /dashboard. Footer.tsx:25, InteractiveDemo.tsx:118, Sections.tsx:178. For a signed-out visitor that is now: /dashboard → proxy → /login?next=/dashboard → sign in → /dashboard. It works, but "Start Now" should go to /register (as Hero.tsx:56 correctly does). Worth aligning.
+
+9. assertSameOrigin() is redundant with Next 16's built-in Server Action origin check but harmless and still needed for Route Handlers. Keep it.
+
+10. No error.tsx / not-found.tsx / loading.tsx anywhere. A thrown HttpError in any server component renders the default Next error page in production with no way back. Add at minimum src/app/error.tsx and src/app/not-found.tsx.
+
+Order of operations
+
+# 1. Files
+
+rm src/middleware.ts tailwind.config.ts src/lib/env.ts
+
+#    then paste every file above
+
+# 2. Database  (backfill — without this, existing users stay stuck)
+
+supabase db push        # or run 0006 in the SQL editor
+
+# 3. Supabase dashboard → Authentication → URL Configuration
+
+#    Site URL:      https://your-domain
+
+#    Redirect URLs: https://your-domain/auth/callback
+
+#                   https://your-domain/auth/confirm
+
+#                   http://localhost:3000/auth/callback
+
+#                   http://localhost:3000/auth/confirm
+
+# 4. Verify
+
+pnpm install
+
+pnpm typecheck
+
+pnpm build
+
+pnpm dev
+
+The one change that stops the redirect on its own is 2.25 + 2.27 (server-decided destination) plus the 0006 backfill. Everything else prevents it from coming back through a different door._

@@ -1,384 +1,135 @@
 "use client";
+import React from "react";
+import Link from "next/link";
+import { CheckCircle2Icon } from "lucide-react";
 
-import { VocabularyCategory } from "@/data/vocabularyData";
-import {
-  Briefcase,
-  Plane,
-  Heart,
-  GraduationCap,
-  Laptop,
-  Trees,
-  UtensilsCrossed,
-  MessageCircle,
-} from "lucide-react";
+import type { VocabularyCategory } from "@/data/vocabularyData";
+import { paletteFor } from "@/lib/vocabulary/ui";
 
-const CARD_COLORS = [
-  "#EC4899",
-  "#3B82F6",
-  "#F59E0B",
-  "#EF4444",
-  "#10B981",
-  "#8B5CF6",
-  "#06B6D4",
-  "#22C55E",
-];
+/**
+ * بطاقة الفئة.
+ *
+ * · صارت رابطاً حقيقياً (`/vocabulary/<id>`) بدل زر يغيّر حالة محلية — فيعمل
+ *   زر الرجوع في المتصفح، ويمكن مشاركة رابط الفئة، وتُحفظ الحالة عند التحديث.
+ * · اللون والأيقونة مشتقّان من `category.id` فلا يتبدّلان مع الفلترة.
+ * · العنوان العربي أساسي والإنجليزي سطر ثانوي (الشاشة عربية).
+ */
 
-const ICONS = [
-  Briefcase,
-  Plane,
-  GraduationCap,
-  Heart,
-  Laptop,
-  MessageCircle,
-  Trees,
-  UtensilsCrossed,
-];
-
-interface CategoryCardProps {
+export interface CategoryCardProps {
   category: VocabularyCategory;
   progress: number;
-  index: number;
-  onClick: () => void;
+  learnedCount: number;
+  href?: string;
+  compact?: boolean;
 }
 
 export function CategoryCard({
   category,
   progress,
-  index,
-  onClick,
+  learnedCount,
+  href,
+  compact = false
 }: CategoryCardProps) {
-  const color = CARD_COLORS[index % CARD_COLORS.length];
-  const Icon = ICONS[index % ICONS.length];
+  const { color, icon: Icon } = paletteFor(category.id);
+  const percent = Math.max(0, Math.min(100, Math.round(progress)));
+  const isDone = percent >= 100;
 
   return (
-    <button
-      onClick={onClick}
-      className="
-        group
-        relative
-        overflow-hidden
-        rounded-[22px]
-        border
-        text-left
-        transition-all
-        duration-300
-        ease-out
-        hover:-translate-y-[4px]
-        hover:shadow-[0_18px_45px_rgba(0,0,0,.42)]
-        active:scale-[.985]
-      "
-                style={{
-          background: `
-          linear-gradient(
-          180deg,
-          ${color}08 0%,
-          #182132 18%,
-          #141D2C 55%,
-          #111827 100%
-          )
-          `,
+    <Link
+      href={href ?? `/vocabulary/${category.id}`}
+      dir="rtl"
+      aria-label={`${category.titleAr} — ${category.words.length} كلمة، أتقنت ${learnedCount}`}
+      className="group relative flex flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[#0B101B] text-right transition-all duration-300 hover:-translate-y-1 hover:border-white/20 hover:shadow-[0_24px_50px_-24px_rgba(0,0,0,0.9)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60">
 
-        borderColor: "rgba(255,255,255,.045)",
-
-        boxShadow:
-          "0 8px 28px rgba(0,0,0,.32), inset 0 1px rgba(255,255,255,.03)",
-      }}
-    >
-      {/* ================= IMAGE ================= */}
-
-      <div className="relative h-[180px] overflow-hidden">
-
+      {/* الغلاف */}
+      <div className={`relative w-full overflow-hidden ${compact ? "h-[104px]" : "h-[128px]"}`}>
         <img
           src={category.coverImage}
-          alt={category.titleEn}
-          className="
-            absolute
-            inset-0
-            h-full
-            w-full
-            object-cover
-            brightness-[.90]
-            contrast-[1.08]
-            saturate-[1.05]
-            duration-700
-            group-hover:scale-[1.06]
-          "
-        />
+          alt=""
+          aria-hidden
+          loading="lazy"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
 
-        {/* Dark Cinematic Overlay */}
 
-        <div
+        <span
+          aria-hidden
           className="absolute inset-0"
           style={{
-            background: `
-            linear-gradient(
-              180deg,
-
-              rgba(5,8,15,.03) 0%,
-
-              rgba(5,8,15,.10) 20%,
-
-              rgba(5,8,15,.22) 40%,
-
-              rgba(5,8,15,.55) 65%,
-
-              rgba(17,24,39,.92) 88%,
-
-              #111827 100%
-            )
-          `,
-          }}
-        />
-
-        {/* Soft Top Light */}
-
-        <div
-          className="absolute inset-0 opacity-30"
-          style={{
             background:
-              "radial-gradient(circle at 50% -10%, rgba(255,255,255,.18), transparent 55%)",
-          }}
-        />
+            "linear-gradient(180deg, rgba(11,16,27,0) 0%, rgba(11,16,27,.35) 45%, rgba(11,16,27,.96) 100%)"
+          }} />
 
-        {/* Color Glow */}
 
-        <div
-          className="
-            absolute
-            -bottom-16
-            left-1/2
-            h-36
-            w-36
-            -translate-x-1/2
-            rounded-full
-            blur-[70px]
-            opacity-25
-          "
-          style={{
-            background: color,
-          }}
-        />
+        <span
+          aria-hidden
+          className="absolute -bottom-10 right-6 h-24 w-24 rounded-full opacity-40 blur-2xl transition-opacity duration-300 group-hover:opacity-70"
+          style={{ backgroundColor: color }} />
 
-        {/* Premium Icon */}
 
-        <div
-          className="
-            absolute
-            bottom-5
-            right-5
-            flex
-            h-11
-            w-11
-            items-center
-            justify-center
-            rounded-full
-            border
-            backdrop-blur-2xl
-            duration-300
-            group-hover:scale-110
-          "
-          style={{
-            background: "rgba(20,28,40,.72)",
+        {/* لمعة عند المرور */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
 
-            borderColor: `${color}55`,
 
-            boxShadow:
-              "0 8px 22px rgba(0,0,0,.40), inset 0 1px rgba(255,255,255,.05)",
-          }}
-        >
-          <Icon
-            size={20}
-            strokeWidth={2.2}
-            style={{
-              color,
-            }}
-          />
-        </div>
-
-        {/* Inner Highlight */}
-
-        <div
-          className="
-            absolute
-            inset-0
-            rounded-t-[22px]
-            border-b
-            border-white/[0.03]
-          "
-        />
+        {isDone &&
+        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300 backdrop-blur-sm">
+            <CheckCircle2Icon size={12} aria-hidden />
+            مكتملة
+          </span>
+        }
       </div>
 
-      {/* ================= CONTENT ================= */}
+      {/* المحتوى */}
+      <div className="relative -mt-7 flex flex-1 flex-col gap-3 px-4 pb-4">
+        <span
+          aria-hidden
+          className="flex h-10 w-10 items-center justify-center rounded-xl border backdrop-blur-md"
+          style={{
+            backgroundColor: `${color}22`,
+            borderColor: `${color}45`
+          }}>
 
-      <div className="px-4 pt-3 pb-4">
-        <h3
-          className="
-            min-h-[48px]
-            text-[15px]
-            font-bold
-            leading-6
-            tracking-[-0.02em]
-            text-slate-50
-            transition-colors
-            duration-300
-            group-hover:text-white
-          "
-        >
-          {category.titleEn}
-        </h3>
+          <Icon size={19} style={{ color }} />
+        </span>
 
-        <div className="mt-2 flex items-center justify-between">
+        <div>
+          <h3 className="text-[15px] font-black leading-tight text-white">{category.titleAr}</h3>
+          <p className="font-en mt-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-slate-500">
+            {category.titleEn}
+          </p>
+        </div>
+
+        <div className="mt-auto flex items-center justify-between text-[11.5px] font-bold">
+          <span className="text-slate-400">
+            <span className="font-en text-white">{category.words.length}</span> كلمة
+          </span>
+          <span className="text-slate-500">
+            أتقنت <span className="font-en" style={{ color }}>{learnedCount}</span>
+          </span>
+        </div>
+
+        <div
+          className="h-[5px] w-full overflow-hidden rounded-full bg-white/[0.06]"
+          role="progressbar"
+          aria-valuenow={percent}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`تقدم ${category.titleAr}`}>
 
           <span
-            className="
-              text-[12px]
-              font-medium
-              text-slate-500
-            "
-          >
-            {category.words.length} كلمة
-          </span>
-
-          <span
-            className="text-[13px] font-bold tracking-wide"
+            className="block h-full rounded-full transition-[width] duration-700 ease-out"
             style={{
-              color,
-            }}
-          >
-            {progress}%
-          </span>
+              width: `${percent}%`,
+              backgroundImage: `linear-gradient(90deg, ${color}, ${color}99)`
+            }} />
 
         </div>
 
-        {/* Progress */}
-
-        <div className="mt-4">
-
-          <div
-            className="
-              relative
-              h-[4px]
-              overflow-hidden
-              rounded-full
-              bg-[#2B3445]
-            "
-          >
-
-            <div
-              className="
-                absolute
-                inset-y-0
-                left-0
-                rounded-full
-                transition-all
-                duration-700
-              "
-              style={{
-                width: `${progress}%`,
-                background: color,
-                boxShadow: `
-                  0 0 10px ${color}99,
-                  0 0 22px ${color}55
-                `,
-              }}
-            />
-
-          </div>
-
-        </div>
+        <div className="font-en text-left text-[11px] font-bold text-slate-500">{percent}%</div>
       </div>
+    </Link>);
 
-      {/* Soft Glow */}
-
-      <div
-        className="
-          pointer-events-none
-          absolute
-          -right-24
-          -top-24
-          h-52
-          w-52
-          rounded-full
-          opacity-0
-          blur-[100px]
-          transition-all
-          duration-500
-          group-hover:opacity-10
-        "
-        style={{
-          background: color,
-        }}
-      />
-
-      {/* Glass Reflection */}
-
-      <div
-        className="
-          pointer-events-none
-          absolute
-          inset-0
-          opacity-0
-          transition-opacity
-          duration-500
-          group-hover:opacity-100
-        "
-      >
-
-        <div
-          className="
-            absolute
-            -left-40
-            top-0
-            h-full
-            w-24
-            rotate-[22deg]
-            bg-gradient-to-r
-            from-transparent
-            via-white/15
-            to-transparent
-            transition-all
-            duration-[1400ms]
-            group-hover:left-[130%]
-          "
-        />
-
-      </div>
-
-      {/* Inner Border */}
-
-      <div
-        className="
-          pointer-events-none
-          absolute
-          inset-[1px]
-          rounded-[21px]
-          border
-        "
-        style={{
-          borderColor: "rgba(255,255,255,.025)",
-        }}
-      />
-
-      {/* Noise Texture */}
-
-      <div
-        className="
-          pointer-events-none
-          absolute
-          inset-0
-          opacity-[0.025]
-          mix-blend-overlay
-        "
-        style={{
-          backgroundImage: `
-            radial-gradient(circle at 25% 25%, white 1px, transparent 1px),
-            radial-gradient(circle at 75% 60%, white 1px, transparent 1px),
-            radial-gradient(circle at 45% 85%, white 1px, transparent 1px)
-          `,
-          backgroundSize: "18px 18px",
-        }}
-      />
-
-    </button>
-  );
 }
+
+export default CategoryCard;

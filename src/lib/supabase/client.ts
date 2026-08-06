@@ -1,16 +1,30 @@
+"use client";
+
 import { createBrowserClient } from "@supabase/ssr";
 
+import { publicEnv } from "@/lib/env/public";
+import type { Database } from "@/types/database";
+
+/**
+ * Browser client — reads/writes the session from document.cookie.
+ *
+ * Memoised: createBrowserClient() spins up its own auth state machine and
+ * refresh timer. Calling it per render (as the login page did) creates
+ * duplicate token-refresh loops that race each other and can revoke a
+ * perfectly good refresh token.
+ */
+
+let browserClient: ReturnType<typeof createBrowserClient<Database>> | null = null;
+
 export function createClient() {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (browserClient) return browserClient;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn("Supabase environment variables are missing!");
-    return createBrowserClient(
-      "https://placeholder.supabase.co",
-      "sb_publishable_U8srx59omH3L4220jnDtWw_PldnDopg"
-    );
-  }
+  const env = publicEnv();
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  browserClient = createBrowserClient<Database>(
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
+  return browserClient;
 }
