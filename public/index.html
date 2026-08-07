@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WordFlow - Story Reader</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Fredoka:wght@600;700&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        :root {
+            --bg-color: #020512;
+            --card-bg: rgba(6, 11, 25, 0.75);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --text-muted: #8e9bb0;
+            --cyan-accent: #00d2ff;
+            --purple-accent: #a855f7;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: #ffffff;
+            font-family: 'Cairo', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Background Image Layout */
+        .bg-container {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+/* إظهار ألوان الصورة الحقيقية وإلغاء الفلتر الداكن */
+.bg-ship {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center right;
+    /* تم إلغاء التعتيم القوي وتوضيح ألوان الصورة الأصلية */
+    filter: brightness(0.95) contrast(1.05);
+}
+
+/* طبقة ظل ناعمة سوداء (بدون لون أزرق) على اليسار فقط لحماية النص */
+.bg-overlay {
+    position: absolute;
+    inset: 0;
+    background: 
+        /* ظل أسود ناعم ومستهدف خلف منطقة النصوص والبطاقات */
+        radial-gradient(circle at 20% 45%, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.4) 50%, transparent 80%),
+        /* تدرج خفيف جداً من الأعلى والأسفل للتناسق */
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.4) 0%, transparent 30%, transparent 70%, rgba(0, 0, 0, 0.6) 100%);
+    pointer-events: none;
+}
+
+        /* App Main Wrapper */
+        .app-container {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 25px 50px;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            justify-content: space-between;
+        }
+
+        /* ================= HEADER ================= */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            direction: ltr;
+        }
+
+        .nav-back {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #a0aec0;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 600;
+            direction: rtl;
+            transition: all 0.3s ease;
+        }
+
+        .nav-back:hover {
+            color: #ffffff;
+            transform: translateX(4px);
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .logo-container:hover {
+            transform: scale(1.03);
+        }
+
+        .logo-icon-w {
+            font-family: 'Fredoka', 'Inter', sans-serif;
+            font-size: 34px;
+            font-weight: 700;
+            background: linear-gradient(180deg, #00d2ff 0%, #3b82f6 45%, #a855f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 12px rgba(0, 210, 255, 0.6));
+            letter-spacing: -1px;
+            line-height: 1;
+        }
+
+        .logo-text {
+            font-family: 'Inter', sans-serif;
+            font-size: 24px;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+        }
+
+        .logo-text span {
+            background: linear-gradient(135deg, #ec4899, #f43f5e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .btn-all-stories {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(8, 15, 33, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #ffffff;
+            padding: 8px 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            direction: rtl;
+            backdrop-filter: blur(12px);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn-all-stories:hover {
+            background: rgba(20, 32, 60, 0.7);
+            border-color: rgba(0, 210, 255, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 210, 255, 0.15);
+        }
+
+        .btn-all-stories:active {
+            transform: translateY(0);
+        }
+
+        .btn-all-stories i {
+            font-size: 16px;
+            color: #ffffff;
+        }
+
+        /* ================= MAIN HERO SECTION ================= */
+        main {
+            margin: 15px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .sentence-section {
+            max-width: 680px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            position: relative;
+        }
+
+        /* Level Badge */
+        .level-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(20, 30, 60, 0.6);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            color: #a5b4fc;
+            padding: 4px 14px;
+            border-radius: 20px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            backdrop-filter: blur(8px);
+            margin-bottom: 15px;
+            direction: ltr;
+        }
+
+        /* English Sentence Styling */
+        .english-sentence {
+            font-family: 'Inter', sans-serif;
+            font-size: 52px;
+            font-weight: 800;
+            line-height: 1.25;
+            color: rgba(255, 255, 255, 0.65);
+            letter-spacing: -0.5px;
+            margin-bottom: 20px;
+            direction: ltr;
+            text-align: left;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8), 0 4px 25px rgba(0, 0, 0, 0.9);
+            position: relative;
+        }
+
+        .interactive-word {
+            display: inline-block;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            padding: 0 2px;
+            border-radius: 6px;
+            position: relative;
+        }
+
+        .interactive-word:hover {
+            background: rgba(255, 255, 255, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .word-highlight-cyan,
+        .word-highlight-purple {
+            color: rgba(255, 255, 255, 0.65);
+            font-weight: 900;
+        }
+
+        /* Waiting Underline Caret */
+        .waiting-caret {
+            position: relative;
+            display: inline-block;
+        }
+
+        .waiting-caret::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: #00d2ff;
+            border-radius: 4px;
+            box-shadow: 0 0 12px #00d2ff, 0 0 20px #00d2ff;
+            animation: caretBlink 1s infinite alternate ease-in-out;
+        }
+
+        @keyframes caretBlink {
+            0% {
+                opacity: 0.2;
+                transform: scaleX(0.85);
+            }
+            100% {
+                opacity: 1;
+                transform: scaleX(1);
+            }
+        }
+
+        /* ================= ULTRA-TRANSPARENT WORD POP CARD ================= */
+        .word-pop-card {
+            position: absolute;
+            z-index: 100;
+            background: rgba(8, 15, 32, 0.65);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            border-radius: 18px;
+            padding: 14px 18px;
+            width: 240px;
+            backdrop-filter: blur(25px) saturate(180%);
+            -webkit-backdrop-filter: blur(25px) saturate(180%);
+            box-shadow: 
+                0 20px 40px rgba(0, 0, 0, 0.6),
+                0 0 20px rgba(0, 210, 255, 0.15),
+                inset 0 1px 1px rgba(255, 255, 255, 0.2);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(8px) scale(0.95);
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
+            direction: ltr;
+        }
+
+        .word-pop-card.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+
+        .word-pop-card::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 22px;
+            width: 10px;
+            height: 10px;
+            background: rgba(8, 15, 32, 0.65);
+            border-bottom: 1px solid rgba(0, 210, 255, 0.3);
+            border-right: 1px solid rgba(0, 210, 255, 0.3);
+            backdrop-filter: blur(25px);
+            transform: rotate(45deg);
+        }
+
+        .pop-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .pop-word-title {
+            font-family: 'Inter', sans-serif;
+            font-size: 19px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 30%, #00d2ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.3px;
+        }
+
+        .pop-audio-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: rgba(0, 210, 255, 0.12);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+            color: #00d2ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s ease;
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.15);
+        }
+
+        .pop-audio-btn:hover {
+            background: rgba(0, 210, 255, 0.3);
+            transform: scale(1.1);
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.4);
+        }
+
+        .pop-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .pop-pos-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 9px;
+            border-radius: 20px;
+            background: rgba(168, 85, 247, 0.15);
+            border: 1px solid rgba(168, 85, 247, 0.35);
+            color: #d8b4fe;
+            font-family: 'Inter', 'Cairo', sans-serif;
+        }
+
+        .pop-divider {
+            height: 1px;
+            background: linear-gradient(90deg, rgba(255, 255, 255, 0.15), transparent);
+            margin: 8px 0;
+        }
+
+        .pop-translation-body {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            direction: rtl;
+            text-align: right;
+        }
+
+        .pop-arabic-meaning {
+            font-size: 15px;
+            font-weight: 700;
+            color: #38bdf8;
+            text-shadow: 0 0 12px rgba(56, 189, 248, 0.3);
+        }
+
+        .pop-example-hint {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.55);
+            font-weight: 500;
+        }
+
+        /* Arabic Translation */
+        .arabic-translation {
+            font-size: 22px;
+            font-weight: 700;
+            color: #38bdf8;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            direction: rtl;
+        }
+
+        .arabic-translation span {
+            text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+        }
+
+        .underline-glow {
+            width: 55px;
+            height: 3px;
+            background: linear-gradient(90deg, #00d2ff, #a855f7);
+            border-radius: 3px;
+            box-shadow: 0 0 10px #00d2ff;
+        }
+
+        /* ================= AUDIO CONTROLS BAR ================= */
+        .audio-controls-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            direction: ltr;
+            margin-top: 5px;
+        }
+
+        .btn-voice-selector {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(13, 22, 45, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 14px 24px;
+            border-radius: 50px;
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.25s ease;
+        }
+
+        .btn-voice-selector:hover {
+            background: rgba(20, 32, 60, 0.65);
+            border-color: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .btn-voice-selector i.fa-microphone {
+            color: #00d2ff;
+            font-size: 16px;
+        }
+
+        .btn-voice-selector i.fa-chevron-down {
+            color: #94a3b8;
+            font-size: 12px;
+        }
+
+        .btn-play-main {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            background: linear-gradient(90deg, #c026d3 0%, #a855f7 35%, #2563eb 80%, #00d2ff 100%);
+            border: none;
+            color: #ffffff;
+            padding: 14px 34px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            box-shadow: 
+                0 0 30px rgba(192, 38, 211, 0.5),
+                0 0 45px rgba(37, 99, 235, 0.3);
+            transition: all 0.25s ease;
+        }
+
+        .btn-play-main:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 
+                0 0 40px rgba(192, 38, 211, 0.7),
+                0 0 55px rgba(37, 99, 235, 0.5);
+        }
+
+        .btn-play-main:active {
+            transform: translateY(0) scale(0.98);
+        }
+
+        .btn-play-main .play-text-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-play-main i.fa-play {
+            font-size: 14px;
+        }
+
+        .btn-play-main .audio-icons-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            opacity: 0.9;
+        }
+
+        .btn-play-main i.fa-bars-staggered,
+        .btn-play-main i.fa-sliders {
+            font-size: 15px;
+        }
+
+        .btn-repeat-sentence {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(13, 22, 45, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 14px 26px;
+            border-radius: 50px;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.25s ease;
+        }
+
+        .btn-repeat-sentence:hover {
+            background: rgba(20, 32, 60, 0.65);
+            border-color: rgba(255, 255, 255, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .btn-repeat-sentence i.fa-rotate-right {
+            color: #cbd5e1;
+            font-size: 15px;
+            transition: transform 0.4s ease;
+        }
+
+        .btn-repeat-sentence:hover i.fa-rotate-right {
+            transform: rotate(180deg);
+        }
+
+        /* ================= PROGRESS & MOTIVATION DASHBOARD ================= */
+        .dashboard-card {
+            background: rgba(6, 12, 28, 0.65);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 18px 26px;
+            display: grid;
+            grid-template-columns: 1.25fr 1fr;
+            gap: 25px;
+            align-items: center;
+            backdrop-filter: blur(14px);
+            width: 100%;
+            max-width: 780px;
+            margin-top: 25px;
+            direction: rtl;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            transition: border-color 0.3s ease;
+        }
+
+        .dashboard-card:hover {
+            border-color: rgba(0, 210, 255, 0.2);
+        }
+
+        .progress-side {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .progress-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13.5px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .progress-title i {
+            color: #00d2ff;
+            font-size: 13px;
+        }
+
+        .progress-row-details {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .progress-percent {
+            font-family: 'Inter', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            color: #ffffff;
+            min-width: 45px;
+        }
+
+        .progress-bar-container {
+            flex-grow: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            overflow: hidden;
+            direction: ltr;
+        }
+
+        .progress-bar-fill {
+            width: 60%;
+            height: 100%;
+            background: linear-gradient(90deg, #00d2ff, #a855f7);
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.8);
+            transition: width 0.5s ease;
+        }
+
+        .progress-info {
+            color: var(--text-muted);
+            font-size: 11.5px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .motivation-side {
+            border-right: 1px dashed rgba(255, 255, 255, 0.12);
+            padding-right: 24px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .motivation-icon-box {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fbbf24;
+            font-size: 15px;
+            flex-shrink: 0;
+            transition: transform 0.3s ease;
+        }
+
+        .dashboard-card:hover .motivation-icon-box {
+            transform: scale(1.1) rotate(10deg);
+        }
+
+        .motivation-text h4 {
+            font-size: 13.5px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 2px;
+        }
+
+        .motivation-text p {
+            font-size: 11.5px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* ================= FOOTER / SHORTCUTS ================= */
+        footer {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        .shortcuts-bar {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            background: rgba(6, 12, 28, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 10px 24px;
+            border-radius: 50px;
+            backdrop-filter: blur(14px);
+            direction: rtl;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        .shortcut-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13.5px;
+            font-weight: 600;
+            color: #ffffff;
+        }
+
+        .shortcut-item i.fa-bolt {
+            color: #00d2ff;
+            font-size: 14px;
+        }
+
+        .shortcut-item i.fa-rotate-left {
+            color: #00d2ff;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.3s ease;
+        }
+
+        .shortcut-item:hover i.fa-rotate-left {
+            transform: rotate(-90deg);
+        }
+
+        .key-badge-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-family: 'Inter', sans-serif;
+            font-size: 13px;
+            color: #94a3b8;
+            font-weight: 500;
+        }
+
+        .divider-vertical {
+            width: 1px;
+            height: 18px;
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .auto-repeat-toggle {
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+
+        .auto-repeat-toggle.active {
+            color: #00d2ff;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Background Image & Atmospheric Overlay -->
+    <div class="bg-container">
+        <!-- يمكن تغيير الصورة إلى ship.png أو أي صورة أخرى دون تغيير التصميم -->
+        <img src="ship.png" alt="Story Background" class="bg-ship">
+        <div class="bg-overlay"></div>
+    </div>
+
+    <!-- Application Layout -->
+    <div class="app-container">
+
+        <!-- Top Header Navigation -->
+        <header>
+            <a href="#" class="nav-back">
+                <i class="fa-solid fa-arrow-right"></i>
+                العودة إلى القصص
+            </a>
+
+            <!-- Gradient Logo -->
+            <div class="logo-container">
+                <div class="logo-icon-w">W</div>
+                <div class="logo-text">Word<span>Flow</span></div>
+            </div>
+
+            <!-- All Stories Button -->
+            <button class="btn-all-stories">
+                <i class="fa-regular fa-bookmark"></i>
+                <span>جميع القصص</span>
+            </button>
+        </header>
+
+        <!-- Main Reading Interface -->
+        <main>
+            <div class="sentence-section">
+                <!-- Level Pill Badge -->
+                <div class="level-badge">
+                    <i class="fa-solid fa-paper-plane" style="font-size: 11px;"></i>
+                    B1
+                </div>
+
+                <!-- Sentence with Waiting Underline Effect on 'T' -->
+                <h1 class="english-sentence" id="sentenceContainer">
+                    <span class="interactive-word" data-word="The" data-pos="Article / أداة" data-meaning="الـ (أداة تعريف)" data-hint="تستخدم للتعريف"><span class="waiting-caret" id="caretTarget">T</span>he</span> 
+                    <span class="interactive-word word-highlight-cyan" data-word="giant" data-pos="Adjective / صفة" data-meaning="عملاق / ضخم جداً" data-hint="تصف الحجم الكبير">giant</span> 
+                    <span class="interactive-word" data-word="ship" data-pos="Noun / اسم" data-meaning="سفينة" data-hint="وسيلة نقل بحرية">ship</span> 
+                    <span class="interactive-word" data-word="sailed" data-pos="Verb / فعل" data-meaning="أبحرت / أفيقت" data-hint="الحركة في الماء">sailed</span> 
+                    <span class="interactive-word" data-word="across" data-pos="Preposition / حرف جر" data-meaning="عبر / خلال" data-hint="الاتجاه من طرف لآخر">across</span> 
+                    <span class="interactive-word" data-word="the" data-pos="Article / أداة" data-meaning="الـ (أداة تعريف)" data-hint="تستخدم للتعريف">the</span> 
+                    <span class="interactive-word word-highlight-purple" data-word="cold" data-pos="Adjective / صفة" data-meaning="بارد / القارس" data-hint="تصف درجة الحرارة">cold</span> 
+                    <span class="interactive-word" data-word="ocean." data-pos="Noun / اسم" data-meaning="المحيط" data-hint="مسطح مائي واسع">ocean.</span>
+                </h1>
+
+                <!-- Dynamic Floating Word Pop Card -->
+                <div class="word-pop-card" id="wordPopCard">
+                    <div class="pop-card-header">
+                        <span class="pop-word-title" id="popWordTitle">Giant</span>
+                        <div class="pop-audio-btn" id="popAudioBtn">
+                            <i class="fa-solid fa-volume-high"></i>
+                        </div>
+                    </div>
+                    <div class="pop-meta-row">
+                        <span class="pop-pos-badge" id="popPosBadge">Adjective / صفة</span>
+                    </div>
+                    <div class="pop-divider"></div>
+                    <div class="pop-translation-body">
+                        <span class="pop-arabic-meaning" id="popArabicMeaning">عملاق / ضخم جداً</span>
+                        <span class="pop-example-hint" id="popExampleHint">تصف الحجم الكبير</span>
+                    </div>
+                </div>
+
+                <!-- Arabic Translation -->
+                <div class="arabic-translation">
+                    <span>أبحرت السفينة العملاقة عبر المحيط البارد.</span>
+                    <div class="underline-glow"></div>
+                </div>
+            </div>
+
+            <!-- Audio Controls Bar -->
+            <div class="audio-controls-wrapper">
+                <button class="btn-voice-selector" id="voiceBtn">
+                    <i class="fa-solid fa-microphone"></i>
+                    <span id="voiceName">Laura US</span>
+                    <i class="fa-solid fa-chevron-down"></i>
+                </button>
+
+                <button class="btn-play-main" id="playBtn">
+                    <div class="play-text-group">
+                        <i class="fa-solid fa-play" id="playIcon"></i>
+                        <span id="playText">استمع للجملة</span>
+                    </div>
+                    <div class="audio-icons-group">
+                        <i class="fa-solid fa-bars-staggered"></i>
+                        <i class="fa-solid fa-sliders"></i>
+                    </div>
+                </button>
+
+                <button class="btn-repeat-sentence" id="repeatBtn">
+                    <span>إعادة الجملة</span>
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <!-- Story Progress & Motivation Dashboard -->
+            <div class="dashboard-card">
+                <div class="progress-side">
+                    <div class="progress-title">
+                        <i class="fa-solid fa-chart-line"></i>
+                        تقدمك في هذه القصة
+                    </div>
+                    
+                    <div class="progress-row-details">
+                        <div class="progress-percent" id="progressPercent">60%</div>
+                        <div class="progress-info" id="progressLine">السطر 4 من 6</div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" id="progressBarFill"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="motivation-side">
+                    <div class="motivation-icon-box">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <div class="motivation-text">
+                        <h4>استمر! أنت تقوم بعمل رائع</h4>
+                        <p>كل يوم تقرأ، عقلك يتطور أكثر.</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Bottom Shortcuts Footer -->
+        <footer>
+            <div class="shortcuts-bar">
+                <div class="shortcut-item">
+                    <i class="fa-solid fa-bolt"></i>
+                    <span>اختصار سريع: اضغط</span>
+                    <div class="key-badge-box">\</div>
+                </div>
+
+                <div class="divider-vertical"></div>
+
+                <div class="shortcut-item auto-repeat-toggle" id="autoRepeatToggle">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>إعادة الصوت تلقائياً</span>
+                </div>
+            </div>
+        </footer>
+
+    </div>
+
+    <!-- Interactive JavaScript -->
+    <script>
+        const playBtn = document.getElementById('playBtn');
+        const playIcon = document.getElementById('playIcon');
+        const playText = document.getElementById('playText');
+        const repeatBtn = document.getElementById('repeatBtn');
+        const autoRepeatToggle = document.getElementById('autoRepeatToggle');
+        const voiceBtn = document.getElementById('voiceBtn');
+        const voiceName = document.getElementById('voiceName');
+        const caretTarget = document.getElementById('caretTarget');
+
+        // Pop Card Elements
+        const wordPopCard = document.getElementById('wordPopCard');
+        const popWordTitle = document.getElementById('popWordTitle');
+        const popPosBadge = document.getElementById('popPosBadge');
+        const popArabicMeaning = document.getElementById('popArabicMeaning');
+        const popExampleHint = document.getElementById('popExampleHint');
+        const popAudioBtn = document.getElementById('popAudioBtn');
+        const sentenceSection = document.querySelector('.sentence-section');
+
+        let isPlaying = false;
+        let isAutoRepeat = false;
+        let hideCardTimeout = null;
+
+        // Toggle Audio Playback
+        playBtn.addEventListener('click', () => {
+            isPlaying = !isPlaying;
+            if (isPlaying) {
+                playIcon.className = 'fa-solid fa-pause';
+                playText.innerText = 'إيقاف مؤقت';
+                setTimeout(() => {
+                    isPlaying = false;
+                    playIcon.className = 'fa-solid fa-play';
+                    playText.innerText = 'استمع للجملة';
+                }, 3000);
+            } else {
+                playIcon.className = 'fa-solid fa-play';
+                playText.innerText = 'استمع للجملة';
+            }
+        });
+
+        // Repeat Sentence Effect
+        repeatBtn.addEventListener('click', () => {
+            repeatBtn.style.transform = 'scale(0.95)';
+            setTimeout(() => repeatBtn.style.transform = '', 150);
+            
+            isPlaying = true;
+            playIcon.className = 'fa-solid fa-pause';
+            playText.innerText = 'إيقاف مؤقت';
+            setTimeout(() => {
+                isPlaying = false;
+                playIcon.className = 'fa-solid fa-play';
+                playText.innerText = 'استمع للجملة';
+            }, 3000);
+        });
+
+        // Toggle Auto Repeat
+        autoRepeatToggle.addEventListener('click', () => {
+            isAutoRepeat = !isAutoRepeat;
+            autoRepeatToggle.classList.toggle('active');
+        });
+
+        // Key Press Listeners
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '\\') {
+                e.preventDefault();
+                playBtn.click();
+            } else if (e.key.length === 1 && e.key !== ' ') {
+                caretTarget.classList.remove('waiting-caret');
+            }
+        });
+
+        // Voice Selector
+        const voices = ['Laura US', 'John UK', 'Sarah AU'];
+        let currentVoiceIdx = 0;
+        voiceBtn.addEventListener('click', () => {
+            currentVoiceIdx = (currentVoiceIdx + 1) % voices.length;
+            voiceName.innerText = voices[currentVoiceIdx];
+        });
+
+        // Word Pop Card Logic
+        function showPopCard(wordEl) {
+            clearTimeout(hideCardTimeout);
+            
+            const word = wordEl.getAttribute('data-word') || wordEl.innerText.replace('.', '');
+            const pos = wordEl.getAttribute('data-pos') || 'Word';
+            const meaning = wordEl.getAttribute('data-meaning') || 'ترجمة الكلمة';
+            const hint = wordEl.getAttribute('data-hint') || '';
+
+            popWordTitle.innerText = word;
+            popPosBadge.innerText = pos;
+            popArabicMeaning.innerText = meaning;
+            popExampleHint.innerText = hint;
+
+            // Position calculation
+            const wordRect = wordEl.getBoundingClientRect();
+            const sectionRect = sentenceSection.getBoundingClientRect();
+
+            const leftPos = wordRect.left - sectionRect.left;
+            const topPos = wordRect.top - sectionRect.top - 130;
+
+            wordPopCard.style.left = `${Math.max(0, leftPos)}px`;
+            wordPopCard.style.top = `${topPos}px`;
+
+            wordPopCard.classList.add('active');
+        }
+
+        function hidePopCard() {
+            hideCardTimeout = setTimeout(() => {
+                wordPopCard.classList.remove('active');
+            }, 200);
+        }
+
+        // Interactive Word Hover & Click Events
+        document.querySelectorAll('.interactive-word').forEach(word => {
+            word.addEventListener('mouseenter', () => showPopCard(word));
+            word.addEventListener('mouseleave', hidePopCard);
+
+            word.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showPopCard(word);
+                word.style.transform = 'scale(1.1)';
+                setTimeout(() => { word.style.transform = ''; }, 200);
+            });
+        });
+
+        wordPopCard.addEventListener('mouseenter', () => clearTimeout(hideCardTimeout));
+        wordPopCard.addEventListener('mouseleave', hidePopCard);
+
+        popAudioBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            popAudioBtn.style.transform = 'scale(0.85)';
+            setTimeout(() => { popAudioBtn.style.transform = ''; }, 150);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!wordPopCard.contains(e.target) && !e.target.classList.contains('interactive-word')) {
+                wordPopCard.classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>
